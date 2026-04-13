@@ -1,0 +1,59 @@
+# Known Third-Party Tracking and Ad Domains
+# Format: domain
+# These are commonly used trackers, ad networks, and analytics services
+
+# Google Services
+google.com
+google-analytics.com
+doubleclick.net
+googlesyndication.com
+adwords.google.com
+
+# Meta/Facebook Services
+facebook.com
+facebook.net
+fbcdn.net
+instagram.com
+
+# Analytics
+amplitude.com
+mixpanel.com
+segment.com
+chartbeat.com
+
+# Ad Networks
+ads.google.com
+googleads.g.doubleclick.net
+cdn.syndication.twimg.com
+ads-api.twitter.com
+
+# Tracking Pixels and Services
+apis.google.com
+googletagmanager.com
+google-analytics.com
+ga.google.com
+
+# CDNs
+cloudflare.com
+akamai.com
+cdn77.com
+fastly.com
+
+# Microsoft Services
+ads.microsoft.com
+msads.net
+advertising.microsoft.com
+
+# Other Tracking
+amazon-adsystem.com
+criteo.com
+outbrain.com
+taboola.com
+chartbeat.net
+scorecardresearch.com
+
+# Security/SPAM
+malware-domains
+known-phishing
+ransomware-c2
+spyware-indicators

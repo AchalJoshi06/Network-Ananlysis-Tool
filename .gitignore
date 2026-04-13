@@ -1,0 +1,33 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Local environment files
+.env
+.env.*
+
+# Runtime logs and crash outputs
+*.log
+error.log
+error_crash.log
+
+# Generated exports and reports
+connections_*.csv
+network_summary_*.json
+network_analysis_report*.docx
+
+# Markdown docs: keep only README and documentation files
+*.md
+!*README*.md
+!*DOCUMENTATION*.md

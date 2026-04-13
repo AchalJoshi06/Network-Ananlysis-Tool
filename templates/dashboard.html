@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Network Analysis Tool - Dashboard</title>
+    
+    <!-- Chart.js for real-time graphs -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@2.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- External Stylesheets -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard_improved.css') }}">
+</head>
+<body>
+    <!-- Toast Notification Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Notifications Dropdown (will be shown/hidden) -->
+    <div class="notifications-dropdown" id="notificationsDropdown">
+        <div class="notifications-header">
+            <h3>
+                <i class="fas fa-bell"></i>
+                Notifications
+            </h3>
+            <button class="btn-icon small" onclick="clearNotifications()" title="Clear all">
+                <i class="fas fa-trash"></i>
+            </button>
+        </div>
+        <div class="notifications-list" id="notificationsList">
+            <div class="empty-notifications">
+                <i class="fas fa-check-circle"></i>
+                <p>No notifications</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Header Section - IMPROVED LAYOUT -->
+        <header class="header">
+            <div class="header-left">
+                <h1>
+                    <i class="fas fa-network-wired logo"></i>
+                    <span>Network Analysis</span>
+                </h1>
+            </div>
+            
+            <div class="header-center">
+                <div class="status-badge" id="statusBadge">
+                    <div class="status-dot" id="statusDot"></div>
+                    <span id="statusText">Stopped</span>
+                    <span id="statusRuntime">(00:00:00)</span>
+                </div>
+            </div>
+            
+            <div class="header-right">
+                <div class="controls">
+                    <button class="btn btn-primary" id="startBtn" onclick="startMonitoring()" title="Start monitoring">
+                        <i class="fas fa-play"></i> <span class="btn-label">Start</span>
+                    </button>
+                    <button class="btn btn-danger" id="stopBtn" onclick="stopMonitoring()" disabled title="Stop monitoring">
+                        <i class="fas fa-stop"></i> <span class="btn-label">Stop</span>
+                    </button>
+                    <button class="btn btn-secondary" onclick="exportData()" title="Export data">
+                        <i class="fas fa-download"></i> <span class="btn-label">Export</span>
+                    </button>
+                </div>
+
+                <!-- Notification Bell -->
+                <div class="notification-bell">
+                    <button class="btn-icon" id="notificationBell" onclick="toggleNotificationDropdown()" title="Notifications">
+                        <i class="fas fa-bell"></i>
+                        <span class="notification-badge" id="notificationBadge" style="display: none;">0</span>
+                    </button>
+                </div>
+
+                <!-- Dark Mode Toggle -->
+                <button class="btn-icon" id="darkModeToggle" onclick="toggleDarkMode()" title="Toggle Dark Mode">
+                    <i class="fas fa-moon"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Statistics Overview - COMPACT & ALIGNED -->
+        <div class="stats-overview">
+            <div class="stat-card" title="Current upload speed">
+                <div class="stat-icon upload">
+                    <i class="fas fa-arrow-up"></i>
+                </div>
+                <div class="stat-content">
+                    <div class="stat-label">Upload</div>
+                    <div class="stat-value" id="uploadSpeed">
+                        <span class="skeleton" style="width: 60px;"></span>
+                    </div>
+                    <div class="stat-unit">KB/s</div>
+                </div>
+            </div>
+            
+            <div class="stat-card" title="Current download speed">
+                <div class="stat-icon download">
+                    <i class="fas fa-arrow-down"></i>
+                </div>
+                <div class="stat-content">
+                    <div class="stat-label">Download</div>
+                    <div class="stat-value" id="downloadSpeed">
+                        <span class="skeleton" style="width: 60px;"></span>
+                    </div>
+                    <div class="stat-unit">KB/s</div>
+                </div>
+            </div>
+            
+            <div class="stat-card" title="Number of active connections">
+                <div class="stat-icon connections">
+                    <i class="fas fa-link"></i>
+                </div>
+                <div class="stat-content">
+                    <div class="stat-label">Connections</div>
+                    <div class="stat-value" id="totalConnections">
+                        <span class="skeleton" style="width: 40px;"></span>
+                    </div>
+                    <div class="stat-change" id="connectionsChange"></div>
+                </div>
+            </div>
+            
+            <div class="stat-card" title="Number of active network processes">
+                <div class="stat-icon processes">
+                    <i class="fas fa-microchip"></i>
+                </div>
+                <div class="stat-content">
+                    <div class="stat-label">Processes</div>
+                    <div class="stat-value" id="totalProcesses">
+                        <span class="skeleton" style="width: 40px;"></span>
+                    </div>
+                    <div class="stat-change" id="processesChange"></div>
+                </div>
+            </div>
+            
+            <div class="stat-card" title="Total bytes sent">
+                <div class="stat-icon sent">
+                    <i class="fas fa-upload"></i>
+                </div>
+                <div class="stat-content">
+                    <div class="stat-label">Total Sent</div>
+                    <div class="stat-value" id="totalSent">
+                        <span class="skeleton" style="width: 50px;"></span>
+                    </div>
+                    <div class="stat-unit">MB</div>
+                </div>
+            </div>
+            
+            <div class="stat-card" title="Total bytes received">
+                <div class="stat-icon received">
+                    <i class="fas fa-download"></i>
+                </div>
+                <div class="stat-content">
+                    <div class="stat-label">Total Received</div>
+                    <div class="stat-value" id="totalReceived">
+                        <span class="skeleton" style="width: 50px;"></span>
+                    </div>
+                    <div class="stat-unit">MB</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Dashboard Grid - RESPONSIVE CHARTS -->
+        <div class="dashboard-grid">
+            <!-- Real-time Speed Chart -->
+            <div class="chart-card">
+                <div class="chart-header">
+                    <h3 class="chart-title">
+                        <i class="fas fa-chart-line"></i>
+                        <span>Network Speed Trends</span>
+                    </h3>
+                    <div class="time-selector">
+                        <button class="time-btn active" onclick="changeTimeRange(60)" data-range="60" title="Last minute">1m</button>
+                        <button class="time-btn" onclick="changeTimeRange(300)" data-range="300" title="Last 5 minutes">5m</button>
+                        <button class="time-btn" onclick="changeTimeRange(3600)" data-range="3600" title="Last hour">1h</button>
+                        <button class="time-btn" onclick="changeTimeRange(0)" data-range="0" title="Live">Live</button>
+                        <button class="time-refresh-btn" id="speedRefreshBtn" onclick="refreshSpeedTrendChart()" title="Refresh speed chart" aria-label="Refresh speed chart">
+                            <i class="fas fa-rotate-right"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="chart-content">
+                    <canvas id="speedChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Risk Distribution Chart (Donut with labels) -->
+            <div class="chart-card">
+                <div class="chart-header">
+                    <h3 class="chart-title">
+                        <i class="fas fa-shield-alt"></i>
+                        <span>Risk Distribution</span>
+                    </h3>
+                </div>
+                <div class="chart-content">
+                    <div class="chart-legend-inline" id="riskLegend"></div>
+                    <canvas id="riskChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Traffic by Category Chart -->
+            <div class="chart-card">
+                <div class="chart-header">
+                    <h3 class="chart-title">
+                        <i class="fas fa-layer-group"></i>
+                        <span>Traffic by Category</span>
+                    </h3>
+                </div>
+                <div class="chart-content">
+                    <canvas id="categoryChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Top Bandwidth Users Chart -->
+            <div class="chart-card">
+                <div class="chart-header">
+                    <h3 class="chart-title">
+                        <i class="fas fa-signal"></i>
+                        <span>Top Bandwidth Users</span>
+                    </h3>
+                </div>
+                <div class="chart-content">
+                    <canvas id="topTalkersChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Active Connections Table -->
+        <div class="data-section mb-4">
+            <div class="section-header">
+                <h3 class="section-title">
+                    <i class="fas fa-link"></i>
+                    Active Connections
+                    <span class="text-muted" id="connectionCount">(0)</span>
+                </h3>
+                
+                <div class="table-controls">
+                    <div class="search-box">
+                        <i class="fas fa-search search-icon"></i>
+                        <input type="text" placeholder="Search connections..." id="connectionSearch" onkeyup="filterConnections()">
+                    </div>
+                    
+                    <select class="filter-select" id="riskFilter" onchange="filterConnections()">
+                        <option value="">All Risk Levels</option>
+                        <option value="LOW">Low Risk</option>
+                        <option value="MEDIUM">Medium Risk</option>
+                        <option value="HIGH">High Risk</option>
+                        <option value="CRITICAL">Critical Risk</option>
+                    </select>
+                    
+                    <select class="filter-select" id="processFilter" onchange="filterConnections()">
+                        <option value="">All Processes</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="table-scroll-wrapper">
+                <table class="data-table" id="connectionsTable">
+                    <thead>
+                        <tr>
+                            <th class="sortable" onclick="sortTable('connections', 'process_name')">
+                                Process
+                                <i class="fas fa-sort"></i>
+                            </th>
+                            <th class="sortable" onclick="sortTable('connections', 'remote_ip')">
+                                Remote Address
+                                <i class="fas fa-sort"></i>
+                            </th>
+                            <th class="sortable" onclick="sortTable('connections', 'country')">
+                                Country
+                                <i class="fas fa-sort"></i>
+                            </th>
+                            <th class="sortable" onclick="sortTable('connections', 'state')">
+                                State
+                                <i class="fas fa-sort"></i>
+                            </th>
+                            <th class="sortable" onclick="sortTable('connections', 'protocol')">
+                                Protocol
+                                <i class="fas fa-sort"></i>
+                            </th>
+                            <th class="sortable" onclick="sortTable('connections', 'bytes_sent')">
+                                Sent
+                                <i class="fas fa-sort"></i>
+                            </th>
+                            <th class="sortable" onclick="sortTable('connections', 'bytes_recv')">
+                                Received
+                                <i class="fas fa-sort"></i>
+                            </th>
+                            <th class="sortable" onclick="sortTable('connections', 'risk_score')">
+                                Risk
+                                <i class="fas fa-sort"></i>
+                            </th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="connectionsTableBody">
+                        <tr>
+                            <td colspan="9" class="text-center text-muted">
+                                <div class="no-data">
+                                    <i class="fas fa-info-circle"></i>
+                                    <p>No active connections</p>
+                                    <small>Start monitoring to see network activity</small>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Top Processes Table -->
+        <div class="data-section">
+            <div class="section-header">
+                <h3 class="section-title">
+                    <i class="fas fa-microchip"></i>
+                    Top Network Processes
+                    <span class="text-muted" id="processCount">(0)</span>
+                </h3>
+                
+                <div class="table-controls">
+                    <div class="search-box">
+                        <i class="fas fa-search search-icon"></i>
+                        <input type="text" placeholder="Search processes..." id="processSearch" onkeyup="filterProcesses()">
+                    </div>
+                </div>
+            </div>
+            
+            <div class="table-scroll-wrapper">
+                <table class="data-table" id="processesTable">
+                    <thead>
+                        <tr>
+                            <th class="sortable" onclick="sortTable('processes', 'process_name')">
+                                Process
+                                <i class="fas fa-sort"></i>
+                            </th>
+                            <th class="sortable" onclick="sortTable('processes', 'pid')">
+                                PID
+                                <i class="fas fa-sort"></i>
+                            </th>
+                            <th class="sortable" onclick="sortTable('processes', 'path')">
+                                Path
+                                <i class="fas fa-sort"></i>
+                            </th>
+                            <th class="sortable" onclick="sortTable('processes', 'num_connections')">
+                                Connections
+                                <i class="fas fa-sort"></i>
+                            </th>
+                            <th class="sortable" onclick="sortTable('processes', 'bytes_sent')">
+                                Sent
+                                <i class="fas fa-sort"></i>
+                            </th>
+                            <th class="sortable" onclick="sortTable('processes', 'bytes_recv')">
+                                Received
+                                <i class="fas fa-sort"></i>
+                            </th>
+                            <th class="sortable" onclick="sortTable('processes', 'total')">
+                                Total
+                                <i class="fas fa-sort"></i>
+                            </th>
+                            <th class="sortable" onclick="sortTable('processes', 'risk_level')">
+                                Avg Risk
+                                <i class="fas fa-sort"></i>
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody id="processesTableBody">
+                        <tr>
+                            <td colspan="8" class="text-center text-muted">
+                                <div class="no-data">
+                                    <i class="fas fa-info-circle"></i>
+                                    <p>No process data available</p>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- WHOIS Modal -->
+    <div class="modal" id="whoisModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>
+                    <i class="fas fa-info-circle"></i>
+                    WHOIS Information
+                </h3>
+                <button class="modal-close" onclick="closeWhoisModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body" id="whoisContent">
+                <div class="loading-spinner">
+                    <i class="fas fa-spinner fa-spin"></i>
+                    Loading...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- External JavaScript -->
+    <script src="{{ url_for('static', filename='js/dashboard_improved.js') }}"></script>
+</body>
+</html>
