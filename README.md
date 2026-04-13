@@ -1,6 +1,6 @@
-# Network Analysis Bot Dashboard
+# Network Analysis Tool Dashboard
 
-Network Analysis Bot Dashboard is a Flask-based web app for monitoring network activity, process-level traffic usage, and risk insights in real time.
+Network Analysis Tool Dashboard is a Flask-based web app for monitoring network activity, process-level traffic usage, and risk insights in real time.
 
 ## Features
 
@@ -120,4 +120,4 @@ When hosted on Render, monitoring visibility is constrained by container isolati
 
 ## Documentation
 
-- Bot runtime and architecture details: BOT_DOCUMENTATION.md
+- Tool runtime and architecture details: Tool_DOCUMENTATION.md
