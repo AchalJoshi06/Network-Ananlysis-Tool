@@ -28,6 +28,7 @@ For Render deployment:
 - A Render Web Service (Python)
 - GitHub repository connection
 - Python 3.10 or newer runtime
+- Production WSGI server (`gunicorn`)
 
 ## Installation
 
@@ -60,16 +61,21 @@ Dashboard URL:
 3. Use the following settings:
 
 - Build Command: `pip install -r requirements.txt`
-- Start Command: `python app.py`
+- Start Command: `gunicorn app:app --bind 0.0.0.0:$PORT`
 
 4. Add optional environment variable if needed:
 
-- `HOST=0.0.0.0` (Render usually sets proper networking automatically)
+- `PYTHON_VERSION=3.11.9` (optional, for a fixed runtime)
 
 The app already supports Render-style startup via environment variables:
 
 - `PORT` for dynamic service port
 - `RENDER` detection for host binding
+
+You can also deploy with either of these files in the repo root:
+
+- `render.yaml` (Blueprint deployment)
+- `Procfile` (alternative process declaration)
 
 ## Environment Variables
 

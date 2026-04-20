@@ -77,10 +77,41 @@
                     </button>
                 </div>
 
-                <!-- Dark Mode Toggle -->
-                <button class="btn-icon" id="darkModeToggle" onclick="toggleDarkMode()" title="Toggle Dark Mode">
-                    <i class="fas fa-moon"></i>
-                </button>
+                <!-- Settings Menu -->
+                <div class="settings-menu">
+                    <button class="btn-icon" id="settingsBtn" onclick="toggleSettingsDropdown()" title="Settings">
+                        <i class="fas fa-gear"></i>
+                    </button>
+                    <div class="settings-dropdown" id="settingsDropdown">
+                        <div class="settings-header">
+                            <h3>
+                                <i class="fas fa-sliders"></i>
+                                Settings
+                            </h3>
+                        </div>
+
+                        <div class="settings-body">
+                            <div class="settings-item">
+                                <label class="settings-toggle" for="notificationsToggle">
+                                    <span>Enable Notifications</span>
+                                    <input
+                                        type="checkbox"
+                                        id="notificationsToggle"
+                                        onchange="toggleNotificationsPreference(this.checked)"
+                                    >
+                                </label>
+                            </div>
+
+                            <div class="settings-item">
+                                <label class="settings-label" for="themeSelect">Theme</label>
+                                <select id="themeSelect" class="settings-select" onchange="changeTheme(this.value)">
+                                    <option value="dark">Dark</option>
+                                    <option value="light">Light</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </header>
 

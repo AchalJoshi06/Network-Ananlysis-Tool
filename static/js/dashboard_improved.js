@@ -13,7 +13,8 @@ const AppState = {
     data: { connections: [], processes: [] },
     charts: { speed: null, risk: null, category: null, topTalkers: null },
     notifications: { list: [], count: 0 },
-    ui: { dropdownOpen: false, speedRefreshInProgress: false },
+    ui: { dropdownOpen: false, settingsOpen: false, speedRefreshInProgress: false },
+    preferences: { notificationsEnabled: true, theme: 'dark' },
     sort: { column: null, direction: 'asc' },
     previousStats: { connections: 0, processes: 0 },
     debounceTimers: {},
@@ -43,8 +44,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function initializeApp() {
     console.log('🚀 Initializing Dashboard...');
-    
-    loadDarkMode();
+
+    loadUserPreferences();
     setupEventListeners();
     initializeCharts();
     updateStatus();
@@ -61,6 +62,10 @@ function initializeApp() {
         if (!e.target.closest('.notification-bell') && 
             !e.target.closest('.notifications-dropdown')) {
             closeNotificationDropdown();
+        }
+
+        if (!e.target.closest('.settings-menu')) {
+            closeSettingsDropdown();
         }
     });
     
@@ -201,6 +206,11 @@ async function exportData() {
 
 // ==================== NOTIFICATIONS SYSTEM ====================
 function toggleNotificationDropdown() {
+    if (!AppState.preferences.notificationsEnabled) {
+        showToast('Notifications are turned off in Settings', 'warning');
+        return;
+    }
+
     const dropdown = document.getElementById('notificationsDropdown');
     if (!dropdown) return;
     
@@ -221,6 +231,112 @@ function closeNotificationDropdown() {
     }
 }
 
+function toggleSettingsDropdown() {
+    const dropdown = document.getElementById('settingsDropdown');
+    if (!dropdown) return;
+
+    AppState.ui.settingsOpen = !AppState.ui.settingsOpen;
+    dropdown.classList.toggle('active', AppState.ui.settingsOpen);
+}
+
+function closeSettingsDropdown() {
+    const dropdown = document.getElementById('settingsDropdown');
+    if (!dropdown) return;
+
+    AppState.ui.settingsOpen = false;
+    dropdown.classList.remove('active');
+}
+
+function saveUserPreferences() {
+    localStorage.setItem('dashboardPreferences', JSON.stringify(AppState.preferences));
+}
+
+function loadUserPreferences() {
+    const defaults = { notificationsEnabled: true, theme: 'dark' };
+
+    try {
+        const saved = localStorage.getItem('dashboardPreferences');
+        if (saved) {
+            const parsed = JSON.parse(saved);
+            AppState.preferences = {
+                ...defaults,
+                ...parsed,
+                theme: parsed.theme === 'light' ? 'light' : 'dark'
+            };
+        } else {
+            AppState.preferences = defaults;
+        }
+    } catch (error) {
+        console.warn('Failed to parse saved preferences, using defaults.', error);
+        AppState.preferences = defaults;
+    }
+
+    applyTheme(AppState.preferences.theme);
+    saveUserPreferences();
+    syncSettingsUI();
+    updateNotificationUI();
+    updateNotificationBellState();
+}
+
+function syncSettingsUI() {
+    const notificationsToggle = document.getElementById('notificationsToggle');
+    const themeSelect = document.getElementById('themeSelect');
+
+    if (notificationsToggle) {
+        notificationsToggle.checked = AppState.preferences.notificationsEnabled;
+    }
+
+    if (themeSelect) {
+        themeSelect.value = AppState.preferences.theme;
+    }
+}
+
+function updateNotificationBellState() {
+    const bellWrapper = document.querySelector('.notification-bell');
+    if (!bellWrapper) return;
+
+    bellWrapper.classList.toggle('disabled', !AppState.preferences.notificationsEnabled);
+}
+
+function toggleNotificationsPreference(enabled) {
+    AppState.preferences.notificationsEnabled = Boolean(enabled);
+    saveUserPreferences();
+    syncSettingsUI();
+    updateNotificationBellState();
+
+    if (!AppState.preferences.notificationsEnabled) {
+        AppState.notifications.list = [];
+        closeNotificationDropdown();
+        updateNotificationUI();
+        showToast('Notifications turned off', 'info');
+        return;
+    }
+
+    updateNotificationUI();
+    showToast('Notifications turned on', 'success');
+}
+
+function changeTheme(theme) {
+    const nextTheme = theme === 'light' ? 'light' : 'dark';
+    AppState.preferences.theme = nextTheme;
+    applyTheme(nextTheme);
+    saveUserPreferences();
+    syncSettingsUI();
+    updateChartColors();
+    showToast(`Theme changed to ${nextTheme}`, 'info');
+}
+
+function applyTheme(theme) {
+    document.body.classList.remove('dark-mode', 'theme-light');
+
+    if (theme === 'light') {
+        document.body.classList.add('theme-light');
+        return;
+    }
+
+    document.body.classList.add('dark-mode');
+}
+
 /**
  * Add a notification to the system
  * @param {string} title - Notification title
@@ -228,6 +344,8 @@ function closeNotificationDropdown() {
  * @param {string} type - 'info', 'warning', 'error'
  */
 function addNotification(title, message, type = 'info') {
+    if (!AppState.preferences.notificationsEnabled) return;
+
     const notification = {
         id: Date.now(),
         title,
@@ -260,6 +378,17 @@ function updateNotificationUI() {
     const badge = document.getElementById('notificationBadge');
     
     if (!list) return;
+
+    if (!AppState.preferences.notificationsEnabled) {
+        if (badge) badge.style.display = 'none';
+        list.innerHTML = `
+            <div class="empty-notifications">
+                <i class="fas fa-bell-slash"></i>
+                <p>Notifications are off</p>
+            </div>
+        `;
+        return;
+    }
     
     const unreadCount = AppState.notifications.list.filter(n => n.unread).length;
     
@@ -342,7 +471,7 @@ function generateSystemNotifications(stats) {
     if (stats.connections > AppState.previousStats.connections) {
         const diff = stats.connections - AppState.previousStats.connections;
         addNotification(
-            '🔗 New Connections',
+            'New Connections',
             `${diff} new network connection${diff > 1 ? 's' : ''} detected`,
             'info'
         );
@@ -352,7 +481,7 @@ function generateSystemNotifications(stats) {
     if (stats.connections < AppState.previousStats.connections) {
         const diff = AppState.previousStats.connections - stats.connections;
         addNotification(
-            '🔌 Connections Closed',
+            'Connections Closed',
             `${diff} network connection${diff > 1 ? 's' : ''} closed`,
             'info'
         );
@@ -361,7 +490,7 @@ function generateSystemNotifications(stats) {
     // High upload bandwidth
     if (AppState.speed.upload > 5000) { // > 5 MB/s
         addNotification(
-            '📤 High Upload Activity',
+            'High Upload Activity',
             `Upload speed peaked at ${formatSpeed(AppState.speed.upload)}`,
             'warning'
         );
@@ -370,7 +499,7 @@ function generateSystemNotifications(stats) {
     // High download bandwidth
     if (AppState.speed.download > 5000) { // > 5 MB/s
         addNotification(
-            '📥 High Download Activity',
+            'High Download Activity',
             `Download speed peaked at ${formatSpeed(AppState.speed.download)}`,
             'warning'
         );
@@ -380,7 +509,7 @@ function generateSystemNotifications(stats) {
     if (stats.processes > AppState.previousStats.processes) {
         const diff = stats.processes - AppState.previousStats.processes;
         addNotification(
-            '⚙️ Process Activity',
+            'Process Activity',
             `${diff} new network process${diff > 1 ? 'es' : ''} started`,
             'info'
         );
@@ -392,34 +521,17 @@ function generateSystemNotifications(stats) {
     };
 }
 
-// ==================== DARK MODE ====================
+// ==================== THEME ====================
 function toggleDarkMode() {
-    const isDark = document.body.classList.toggle('dark-mode');
-    localStorage.setItem('darkMode', isDark ? 'enabled' : 'disabled');
-    
-    const icon = document.querySelector('#darkModeToggle i');
-    if (icon) {
-        icon.className = isDark ? 'fas fa-sun' : 'fas fa-moon';
-    }
-    
-    // Update charts
-    updateChartColors();
-    showToast(isDark ? '🌙 Dark mode enabled' : '☀️ Light mode enabled', 'info');
-}
-
-function loadDarkMode() {
-    if (localStorage.getItem('darkMode') === 'enabled') {
-        document.body.classList.add('dark-mode');
-        const icon = document.querySelector('#darkModeToggle i');
-        if (icon) icon.className = 'fas fa-sun';
-    }
+    const nextTheme = AppState.preferences.theme === 'dark' ? 'light' : 'dark';
+    changeTheme(nextTheme);
 }
 
 // ==================== CHARTS ====================
 function initializeCharts() {
-    const isDark = document.body.classList.contains('dark-mode');
-    const textColor = isDark ? '#f1f5f9' : '#0f172a';
-    const gridColor = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)';
+    const chartTheme = getChartThemeValues();
+    const textColor = chartTheme.textColor;
+    const gridColor = chartTheme.gridColor;
     
     // Speed Chart - Line with dual Y-axis
     const speedCtx = document.getElementById('speedChart');
@@ -430,10 +542,10 @@ function initializeCharts() {
                 {
                     label: 'Upload (KB/s)',
                     data: [],
-                    borderColor: 'rgb(34, 197, 94)',
-                    backgroundColor: 'rgba(34, 197, 94, 0.05)',
+                    borderColor: '#43a047',
+                    backgroundColor: 'rgba(67, 160, 71, 0)',
                     tension: 0.3,
-                    fill: true,
+                    fill: false,
                     yAxisID: 'y-upload',
                     borderWidth: 2,
                     pointRadius: 2,
@@ -442,10 +554,10 @@ function initializeCharts() {
                 {
                     label: 'Download (KB/s)',
                     data: [],
-                    borderColor: 'rgb(59, 130, 246)',
-                    backgroundColor: 'rgba(59, 130, 246, 0.05)',
+                    borderColor: '#ffd54f',
+                    backgroundColor: 'rgba(255, 213, 79, 0)',
                     tension: 0.3,
-                    fill: true,
+                    fill: false,
                     yAxisID: 'y-download',
                     borderWidth: 2,
                     pointRadius: 2,
@@ -484,19 +596,19 @@ function initializeCharts() {
                             maxRotation: 45,
                             minRotation: 0
                         }, 
-                        grid: { display: false } 
+                        grid: { color: gridColor } 
                     },
                     'y-upload': {
                         type: 'linear',
                         position: 'left',
-                        ticks: { color: 'rgb(34, 197, 94)', callback: v => formatSpeed(v) },
-                        grid: { color: 'rgba(34, 197, 94, 0.05)' }
+                        ticks: { color: '#43a047', callback: v => formatSpeed(v) },
+                        grid: { color: gridColor }
                     },
                     'y-download': {
                         type: 'linear',
                         position: 'right',
-                        ticks: { color: 'rgb(59, 130, 246)', callback: v => formatSpeed(v) },
-                        grid: { color: 'rgba(59, 130, 246, 0.05)' }
+                        ticks: { color: '#ffd54f', callback: v => formatSpeed(v) },
+                        grid: { color: gridColor }
                     }
                 }
             }
@@ -513,16 +625,16 @@ function initializeCharts() {
                 datasets: [{
                     data: [0, 0, 0, 0],
                     backgroundColor: [
-                        'rgba(16, 185, 129, 0.8)',
-                        'rgba(245, 158, 11, 0.8)',
-                        'rgba(239, 68, 68, 0.8)',
-                        'rgba(220, 38, 38, 0.8)'
+                        'rgba(67, 160, 71, 0.8)',
+                        'rgba(255, 179, 0, 0.8)',
+                        'rgba(216, 67, 67, 0.8)',
+                        'rgba(183, 28, 28, 0.8)'
                     ],
                     borderColor: [
-                        'rgb(16, 185, 129)',
-                        'rgb(245, 158, 11)',
-                        'rgb(239, 68, 68)',
-                        'rgb(220, 38, 38)'
+                        '#43a047',
+                        '#ffb300',
+                        '#d84343',
+                        '#b71c1c'
                     ],
                     borderWidth: 2
                 }]
@@ -555,8 +667,8 @@ function initializeCharts() {
             data: { labels: [], datasets: [{
                 label: 'Connections',
                 data: [],
-                backgroundColor: 'rgba(99, 102, 241, 0.8)',
-                borderColor: 'rgb(99, 102, 241)',
+                backgroundColor: 'rgba(255, 213, 79, 0.8)',
+                borderColor: '#ffd54f',
                 borderWidth: 1,
                 borderRadius: 4
             }]},
@@ -566,7 +678,7 @@ function initializeCharts() {
                 indexAxis: undefined,
                 plugins: { legend: { display: false } },
                 scales: {
-                    x: { ticks: { color: textColor }, grid: { display: false } },
+                    x: { ticks: { color: textColor }, grid: { color: gridColor } },
                     y: { beginAtZero: true, ticks: { color: textColor }, grid: { color: gridColor } }
                 }
             }
@@ -581,8 +693,8 @@ function initializeCharts() {
             data: { labels: [], datasets: [{
                 label: 'Data Transfer',
                 data: [],
-                backgroundColor: 'rgba(168, 85, 247, 0.8)',
-                borderColor: 'rgb(168, 85, 247)',
+                backgroundColor: 'rgba(255, 213, 79, 0.78)',
+                borderColor: '#ffd54f',
                 borderWidth: 1,
                 borderRadius: 4
             }]},
@@ -606,23 +718,47 @@ function initializeCharts() {
 
 function updateChartColors() {
     if (!AppState.charts.speed) return;
-    
-    const isDark = document.body.classList.contains('dark-mode');
-    const textColor = isDark ? '#f1f5f9' : '#0f172a';
-    const gridColor = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)';
+
+    const chartTheme = getChartThemeValues();
+    const textColor = chartTheme.textColor;
+    const gridColor = chartTheme.gridColor;
     
     Object.values(AppState.charts).forEach(chart => {
         if (chart?.options?.plugins?.legend?.labels) {
             chart.options.plugins.legend.labels.color = textColor;
         }
         if (chart?.options?.scales) {
-            Object.values(chart.options.scales).forEach(scale => {
-                if (scale?.ticks) scale.ticks.color = textColor;
-                if (scale?.grid) scale.grid.color = gridColor;
+            Object.entries(chart.options.scales).forEach(([axisName, scale]) => {
+                if (scale?.ticks) {
+                    if (axisName === 'y-upload') {
+                        scale.ticks.color = '#43a047';
+                    } else if (axisName === 'y-download') {
+                        scale.ticks.color = '#ffd54f';
+                    } else {
+                        scale.ticks.color = textColor;
+                    }
+                }
+                if (scale?.grid) {
+                    scale.grid.color = gridColor;
+                }
             });
         }
         chart?.update('none');
     });
+}
+
+function getChartThemeValues() {
+    if (AppState.preferences.theme === 'light') {
+        return {
+            textColor: '#1f1f1f',
+            gridColor: 'rgba(79,79,79,0.18)'
+        };
+    }
+
+    return {
+        textColor: '#ffffff',
+        gridColor: 'rgba(176,176,176,0.2)'
+    };
 }
 
 async function updateDashboard() {
@@ -790,9 +926,9 @@ function updateCharts(stats, connections, processes) {
                 const maxBytes = ((sorted[0].bytes_sent || 0) + (sorted[0].bytes_recv || 0));
                 const ratio = maxBytes > 0 ? bytes / maxBytes : 0;
 
-                if (ratio > 0.7) return 'rgba(239, 68, 68, 0.8)';
-                if (ratio > 0.4) return 'rgba(251, 191, 36, 0.8)';
-                return 'rgba(139, 92, 246, 0.8)';
+                if (ratio > 0.7) return 'rgba(183, 28, 28, 0.85)';
+                if (ratio > 0.4) return 'rgba(255, 193, 7, 0.8)';
+                return 'rgba(90, 90, 90, 0.8)';
             });
 
             AppState.charts.topTalkers.data.datasets[0].backgroundColor = colors;
@@ -1019,11 +1155,11 @@ function renderConnectionsTable(connections) {
     
     const rows = connections.slice(0, 100).map(conn => {
         const riskColor = {
-            'LOW': '#10b981',
-            'MEDIUM': '#f59e0b', 
-            'HIGH': '#ef4444',
-            'CRITICAL': '#dc2626'
-        }[conn.risk_level] || '#6b7280';
+            'LOW': '#43a047',
+            'MEDIUM': '#ffb300',
+            'HIGH': '#d84343',
+            'CRITICAL': '#b71c1c'
+        }[conn.risk_level] || '#b0b0b0';
         
         return `<tr>
             <td>${conn.process_name || 'Unknown'}</td>
@@ -1082,10 +1218,10 @@ function updateRiskLegend(riskData) {
     if (total === 0) return;
     
     const items = [
-        { label: 'Low', value: riskData.LOW || 0, color: '#10b981' },
-        { label: 'Medium', value: riskData.MEDIUM || 0, color: '#f59e0b' },
-        { label: 'High', value: riskData.HIGH || 0, color: '#ef4444' },
-        { label: 'Critical', value: riskData.CRITICAL || 0, color: '#dc2626' }
+        { label: 'Low', value: riskData.LOW || 0, color: '#43a047' },
+        { label: 'Medium', value: riskData.MEDIUM || 0, color: '#ffb300' },
+        { label: 'High', value: riskData.HIGH || 0, color: '#d84343' },
+        { label: 'Critical', value: riskData.CRITICAL || 0, color: '#b71c1c' }
     ];
     
     legend.innerHTML = items.map(item => {

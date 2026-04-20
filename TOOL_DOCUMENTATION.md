@@ -1,130 +1,601 @@
-# Network Analysis Tool - Complete Technical Documentation
+# Network Analysis Tool - Complete Bot Documentation
 
-## 1. Overview
+Last updated: 2026-04-18
+Primary runtime entrypoint: `app.py`
 
-### App Name
-Network Analysis Tool
+## 1. What This Project Is
 
-### Purpose and Core Idea
-This application is a Flask-based, real-time network monitoring dashboard for Windows systems. It collects active connection and process telemetry using `psutil`, enriches it with service categorization, risk scoring, and optional geolocation, then presents the data in a live web interface.
+Network Analysis Tool is a Flask-based local dashboard that monitors system network activity in near real time.
 
-### Problem It Solves
-Modern systems create many background network connections that are hard to inspect in one place. This tool helps users:
-- See which processes are connecting externally.
-- Understand connection risk and category quickly.
-- Track upload/download trends in near real time.
-- Take immediate action (terminate process, block IP, export snapshot data).
+It collects active socket connections and process metadata using `psutil`, enriches that data with:
+- service/domain categorization,
+- risk scoring,
+- protocol labeling,
+- optional GeoIP lookup,
 
-### Target Users
-- Students learning network monitoring/security concepts.
-- Security-conscious power users.
-- Developers and system administrators performing local host inspection.
+and exposes results through REST APIs consumed by a browser dashboard.
 
-## 2. Tech Stack
+## 2. Runtime Architecture
 
-### Languages, Frameworks, Libraries
-- Backend language: Python 3.10+
-- Web framework: Flask
-- Monitoring library: psutil
-- WHOIS lookup: python-whois
-- Visualization helper module: matplotlib (used by `visualizer.py` for Tkinter-style charts)
-- Frontend: HTML, CSS, JavaScript
-- Charts in browser: Chart.js (CDN)
-- Icons: Font Awesome (CDN)
+High-level flow:
 
-### Database and APIs Used
-- Database: None
-- External/local data sources:
-	- WHOIS lookups via `python-whois`
-	- Optional GeoIP lookup via MaxMind GeoLite2 database if available locally
+1. Browser UI loads `templates/dashboard.html`.
+2. Frontend script `static/js/dashboard_improved.js` polls backend APIs (mostly every 1 second).
+3. Flask routes in `app.py` query the global `NetworkMonitor` singleton from `monitor.py`.
+4. Monitor uses `psutil.net_connections(kind='inet')` and `psutil.net_io_counters()` in a background thread.
+5. Backend computes risk/protocol/geo fields and returns JSON payloads.
+6. Frontend updates stat cards, charts, tables, notifications, and status controls.
 
-### Architecture
-- Architecture style: Monolithic Flask web app with modular Python components
-- Communication model: Browser polls REST endpoints every second
-- Runtime model: Background monitoring thread (`NetworkMonitor`) + Flask request threads
+Threading model:
+- One daemon monitor thread started by `/api/start`.
+- Flask request handlers run in threaded mode (`app.run(..., threaded=True)`).
+- Shared monitor state is protected by a `threading.Lock` in `NetworkMonitor` getters/update path.
 
-## 3. Features
-
-### Core Features
-- Start/stop network monitoring from the dashboard.
-- Real-time status (running state, elapsed runtime).
-- Connection list with process, IP/port, protocol, state, risk, category, country/city where available.
-- Process-level statistics with bytes sent/received and connection counts.
-- Summary stats: speeds, totals, risk distribution, category distribution.
-- Protocol distribution statistics.
-- Top bandwidth users (top talkers).
-- Risk scoring (0-100) and risk levels (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`).
-- Data export endpoint for snapshot files.
-
-### Optional/Advanced Features
-- WHOIS lookup endpoint with GeoIP fallback text.
-- IP blocklist editing via API (`blocklist.txt`).
-- Process termination endpoint with basic critical PID protection.
-- Dark mode UI.
-- Notifications dropdown and toast system.
-- Time-range controls for speed trend chart (`1m`, `5m`, `1h`, `Live`).
-
-## 4. Project Structure
-
-### Repository Tree (scanned)
+## 3. Project Structure (Current)
 
 ```text
 network_analysis_tool/
-	.gitignore
-	app.py
-	blocklist.txt
-	BOT_DOCUMENTATION.md
-	check_setup.py
-	dns_resolver.py
-	generate_report.py
-	install.py
-	main.py
-	monitor.py
-	README.md
-	report_exporter.py
-	requirements.txt
-	risk_evaluator.py
-	test_startup.py
-	utils.py
-	visualizer.py
-	static/
-		css/
-			dashboard_improved.css
-		js/
-			dashboard_improved.js
-	templates/
-		dashboard.html
-	venv/
-	__pycache__/
+  app.py
+  blocklist.txt
+  BOT_DOCUMENTATION.md
+  check_setup.py
+  dns_resolver.py
+  generate_report.py
+  install.py
+  main.py
+  monitor.py
+  README.md
+  report_exporter.py
+  requirements.txt
+  risk_evaluator.py
+  test_startup.py
+  utils.py
+  visualizer.py
+  static/
+    css/
+      dashboard_improved.css
+    js/
+      dashboard_improved.js
+  templates/
+    dashboard.html
 ```
 
-### Purpose of Major Files/Folders
-- `app.py`: Flask app, all API routes, formatting helpers, startup config.
-- `monitor.py`: Core monitoring engine, connection/process state, speed calculations.
-- `risk_evaluator.py`: Enum and heuristics for per-connection risk evaluation.
-- `dns_resolver.py`: DNS resolver cache and service categorization logic.
-- `utils.py`: GeoIP helper, risk scorer, protocol detection, system helper methods.
-- `report_exporter.py`: CSV/JSON export utilities and summary generation.
-- `visualizer.py`: Matplotlib/Tkinter visualization helper module.
-- `templates/dashboard.html`: Dashboard structure and UI components.
-- `static/js/dashboard_improved.js`: Client-side app state, polling, chart updates, filters, notifications.
-- `static/css/dashboard_improved.css`: Full dashboard styling, layout, responsive and dark mode themes.
-- `blocklist.txt`: Suspicious/blocked domains/IPs used by categorization logic.
-- `README.md`: User-facing setup/run/deploy instructions.
-- `check_setup.py`: Environment checks (Python, basic dependency install, admin hint).
-- `install.py`: Basic package installer script.
-- `test_startup.py`: Legacy startup test script (currently inconsistent with current architecture).
-- `main.py`: Marked removed/deprecated; web entrypoint is `app.py`.
-- `generate_report.py`: Standalone DOCX report generator script (not integrated with Flask app).
+## 4. Dependency Map
 
-## 5. Setup and Installation
+### 4.1 Required by `requirements.txt`
+- `psutil>=5.9.0`
+- `matplotlib>=3.5.0`
+- `Flask>=3.0.0`
+- `python-whois>=0.9.0`
 
-### Prerequisites
-- Windows OS (project is documented and tuned for Windows behavior).
-- Python 3.10+ recommended.
-- Administrator privileges recommended for full process/network visibility.
+### 4.2 Optional dependencies used by code paths
+- `geoip2` (for MaxMind DB geolocation in `utils.py`)
+- `geolite2` (fallback geolocation reader in `utils.py`)
+- `python-docx` (required by `generate_report.py`)
 
-### Step-by-Step Setup
+If optional packages are missing, core monitoring still runs; those features degrade gracefully.
+
+## 5. Entry Points and Script Status
+
+### Active runtime
+- `python app.py`
+
+### Helper scripts
+- `check_setup.py`: checks Python version, basic deps (`psutil`, `matplotlib`), admin status.
+- `install.py`: installs only `psutil` and `matplotlib` (legacy/minimal installer).
+- `generate_report.py`: standalone DOCX report generator (not integrated with web app).
+
+### Legacy or removed files
+- `main.py`: explicitly marked removed; web app replaced older CLI/GUI flow.
+- `test_startup.py`: marked removed but still contains legacy GUI test code that imports missing symbols.
+
+## 6. Backend Modules (Detailed)
+
+## 6.1 `app.py` (Flask API and orchestration)
+
+Responsibilities:
+- Defines Flask app and all API routes.
+- Creates global singleton instances:
+  - monitor (`get_network_monitor()`)
+  - visualizer (`DataVisualizer()`)
+  - exporter (`ReportExporter()`)
+  - geoip (`get_geoip_lookup()`)
+- Maintains app-level monitoring state dictionary:
+  - `is_running`
+  - `start_time`
+  - `last_update`
+- Starts Flask server with host/port from environment.
+
+Environment variable handling:
+- `HOST` default `127.0.0.1`
+- `PORT` default `5001`
+- if `RENDER` is set -> host forced to `0.0.0.0`
+
+## 6.2 `monitor.py` (network data engine)
+
+Key data classes:
+
+### `ConnectionInfo`
+Fields:
+- `pid: int`
+- `process_name: str`
+- `remote_ip: str`
+- `remote_port: int`
+- `remote_domain: str`
+- `protocol: str`
+- `bytes_sent: int`
+- `bytes_recv: int`
+- `created_at: float`
+- `category: str`
+- `risk_level: RiskLevel`
+- `risk_reason: str`
+- `state: str`
+- `local_port: int`
+- `country: str`
+- `country_name: str`
+- `city: str`
+- `risk_score: int`
+- `process_path: str`
+
+### `ProcessStats`
+Fields:
+- `pid: int`
+- `process_name: str`
+- `bytes_sent: int`
+- `bytes_recv: int`
+- `num_connections: int`
+- `category: str`
+- `avg_risk_level: RiskLevel`
+- `process_path: str`
+
+`NetworkMonitor` responsibilities:
+- Start/stop monitoring thread.
+- Poll active internet connections every second.
+- Track live connections keyed by tuple `(pid, remote_ip, remote_port)`.
+- Remove stale connections not seen in latest poll.
+- Build per-process aggregates.
+- Compute upload/download rates from net I/O deltas.
+
+Accessors:
+- `get_active_connections()`
+- `get_process_stats()`
+- `get_speed()`
+- `get_total_data()`
+- `get_data_by_category()`
+- `get_category_distribution()`
+- `get_top_processes(limit=5)`
+
+Callback system:
+- `register_callback(event_name, callback)`
+- events used in code: `connection_found`, `data_updated`, `permission_error`
+
+## 6.3 `dns_resolver.py` (DNS and categorization)
+
+`ServiceIdentifier`:
+- Loads blocklist from `blocklist.txt`.
+- Maintains category maps for:
+  - trusted services,
+  - tracker services,
+  - CDN services.
+- `categorize_domain(domain)` returns tuple `(category, description)`.
+
+`DNSResolver`:
+- `resolve_ip(ip)` with LRU cache (`maxsize=1024`) and internal dict cache.
+- `resolve_ip_async(ip, callback)` thread-based async helper.
+- `categorize_ip(ip)` -> resolves then categorizes.
+- `get_service_description(ip)`.
+- cache helpers: `clear_cache()`, `get_cache_size()`.
+
+## 6.4 `risk_evaluator.py` (enum + heuristic risk evaluator)
+
+Defines:
+- `RiskLevel` enum: `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`.
+- `RiskEvaluator` with methods:
+  - `evaluate_connection(remote_ip, remote_port, process_name)`
+  - `_get_base_risk(category)`
+  - `_evaluate_port(port)`
+  - `_evaluate_process(process_name)`
+  - `_generate_reason(...)`
+  - `risk_to_color(risk)`
+  - `risk_to_string(risk)`
+
+Main risk factors:
+- service category,
+- destination port,
+- suspicious process naming patterns.
+
+## 6.5 `utils.py` (geoip, scoring, protocol mapping, misc helpers)
+
+### `GeoIPLookup`
+- Attempts MaxMind DB from multiple default paths.
+- Tries `geolite2` fallback reader if available.
+- Returns dict:
+  - `country`, `country_name`, `city`, `is_private`
+- Flags local/private addresses as local network.
+
+### `RiskScorer`
+- Calculates numeric risk score `0..100` plus textual reason.
+- Uses:
+  - high-risk and medium-risk port dictionaries,
+  - category checks,
+  - total byte volume,
+  - upload/download ratio heuristics.
+- `get_risk_level(score)` -> `LOW|MEDIUM|HIGH|CRITICAL`.
+
+### `ProtocolDetector`
+- Port-to-application mapping (HTTP, HTTPS, DNS, SMTP, SSH, RDP, etc.).
+- Falls back to transport protocol string.
+
+### Other utility classes
+- `SystemInfo`
+- `PackageManager`
+- `DataAnalyzer`
+- `ConfigManager`
+- `Logger`
+- `FileHelper`
+
+CLI in this module:
+- `python utils.py sysinfo`
+- `python utils.py install`
+- `python utils.py analyze --file <csv>`
+
+## 6.6 `report_exporter.py`
+
+Export methods:
+- `export_connections_csv(connections, filename=None)`
+- `export_processes_csv(processes, filename=None)`
+- `export_summary_json(summary_data, filename=None)`
+- `export_full_report_csv(connections, processes, summary, filename=None)`
+- `generate_summary_text(connections, processes, speeds, total_data)`
+
+Note:
+- This module exists and is instantiated in `app.py`, but main export route currently uses direct CSV logic instead of these helpers.
+
+## 6.7 `visualizer.py`
+
+Provides matplotlib/Tkinter chart creators:
+- `create_category_pie_chart`
+- `create_top_processes_chart`
+- `create_risk_distribution_chart`
+
+Also includes formatting helpers:
+- `format_bytes`
+- `format_speed`
+
+Note:
+- Current Flask dashboard uses Chart.js in browser, not these Tkinter canvas chart functions.
+
+## 6.8 `generate_report.py`
+
+Standalone script that generates a Word document (`network_analysis_report.docx`) with project-report style content.
+
+Not connected to runtime API or dashboard.
+
+## 7. API Reference (Complete)
+
+Base URL (local): `http://127.0.0.1:5001`
+
+## 7.1 `GET /`
+Returns dashboard HTML template (`dashboard.html`).
+
+## 7.2 `GET /api/status`
+Returns monitor status.
+
+When running:
+```json
+{
+  "running": true,
+  "elapsed_seconds": 123,
+  "runtime_formatted": "00:02:03",
+  "last_update": "2026-04-18T10:30:00.123456"
+}
+```
+
+When stopped:
+```json
+{
+  "running": false,
+  "elapsed_seconds": 0,
+  "runtime_formatted": "00:00:00"
+}
+```
+
+## 7.3 `POST /api/start`
+Starts monitor thread.
+
+Success:
+```json
+{ "success": true, "message": "Monitoring started" }
+```
+
+Possible fail messages:
+- already running
+- runtime exception text
+
+## 7.4 `POST /api/stop`
+Stops monitor thread.
+
+Success:
+```json
+{ "success": true, "message": "Monitoring stopped" }
+```
+
+Possible fail messages:
+- not monitoring
+- runtime exception text
+
+## 7.5 `GET /api/connections`
+Returns up to 100 connections plus metadata.
+
+Response shape:
+```json
+{
+  "success": true,
+  "connections": [
+    {
+      "process_name": "chrome.exe",
+      "pid": 1234,
+      "process_path": "C:\\...",
+      "remote_ip": "142.250.183.110",
+      "remote_port": 443,
+      "remote_domain": "142.250.183.110",
+      "protocol": "TCP",
+      "app_protocol": "HTTPS",
+      "state": "ESTABLISHED",
+      "bytes_sent": 0,
+      "bytes_sent_formatted": "0 B",
+      "bytes_recv": 0,
+      "bytes_recv_formatted": "0 B",
+      "category": "Unknown",
+      "risk_level": "MEDIUM",
+      "risk_score": 35,
+      "risk_reason": "External connection; Unknown traffic category",
+      "age": 20,
+      "age_formatted": "20s",
+      "country": "US",
+      "country_name": "United States",
+      "country_flag": "US flag emoji or fallback",
+      "city": "Mountain View",
+      "is_private": false
+    }
+  ],
+  "total": 27
+}
+```
+
+## 7.6 `GET /api/processes`
+Returns up to top 50 processes.
+
+Fields per item:
+- `process_name`
+- `pid`
+- `process_path`
+- `bytes_sent`
+- `bytes_sent_formatted`
+- `bytes_recv`
+- `bytes_recv_formatted`
+- `total`
+- `total_formatted`
+- `num_connections`
+- `category`
+- `risk_level`
+
+## 7.7 `GET /api/statistics`
+Returns high-level counters and distributions.
+
+`statistics` object fields:
+- `upload_speed`, `upload_speed_formatted`
+- `download_speed`, `download_speed_formatted`
+- `bytes_sent`, `total_sent_formatted`
+- `bytes_recv`, `total_recv_formatted`
+- `total_connections`
+- `total_processes`
+- `risk_distribution` (LOW, MEDIUM, HIGH, CRITICAL)
+- `category_distribution`
+
+## 7.8 `GET /api/protocol_stats`
+Returns application protocol distribution calculated from `ProtocolDetector`.
+
+Fields:
+- `protocol_stats`: array of `{ protocol, count, percentage }`
+- `total`
+
+## 7.9 `GET /api/top_talkers`
+Returns top 10 processes sorted by total bytes (`bytes_sent + bytes_recv`).
+
+Fields per item:
+- `process_name`
+- `pid`
+- `total_bytes`
+- `total_formatted`
+- `bytes_sent`
+- `bytes_recv`
+- `num_connections`
+
+## 7.10 `GET /api/whois?ip=<ip>`
+Behavior:
+- Requires `ip` query param.
+- Tries `python-whois` lookup.
+- Falls back to GeoIP text if WHOIS fails.
+
+Success payload includes `whois` multiline text string.
+
+## 7.11 `POST /api/kill/<pid>`
+Attempts to terminate process.
+
+Safety guard blocks critical PIDs:
+- `0`, `4`, and current app PID.
+
+Possible outcomes:
+- terminated normally,
+- force killed after timeout,
+- process missing,
+- access denied,
+- generic exception.
+
+## 7.12 `POST /api/block/<ip>`
+Adds entry to `blocklist.txt` if not already present.
+
+Behavior:
+- reads existing list,
+- inserts new IP/value,
+- rewrites sorted file.
+
+## 7.13 `POST /api/export`
+Exports active connections to CSV in project directory.
+
+Response example:
+```json
+{
+  "success": true,
+  "files": {
+    "csv": "connections_2026-04-18_143005.csv",
+    "json": "network_summary_2026-04-18_143005.json"
+  },
+  "message": "Data exported successfully"
+}
+```
+
+Important:
+- Only CSV is actually written in this route.
+- JSON filename is returned but JSON file is not generated by this route.
+
+## 7.14 `GET /api/dashboard`
+Returns bundled payload for dashboard use.
+
+Data object includes:
+- speed (`upload_speed`, `download_speed`)
+- totals (`total_sent`, `total_received`)
+- counts (`total_connections`, `total_processes`)
+- `connections` list (trimmed fields)
+- `processes` list (trimmed fields)
+- `speed_history` (single point in current implementation)
+- `risk_distribution`
+- `traffic_by_category`
+- `top_talkers`
+
+## 8. Frontend Documentation
+
+## 8.1 `templates/dashboard.html`
+
+Main sections:
+- Header with Start/Stop/Export controls.
+- Running/stopped status badge and runtime.
+- Notification bell + dropdown.
+- Dark mode toggle.
+- Stat cards (upload/download/connections/processes/sent/received).
+- Four charts:
+  - network speed trend,
+  - risk distribution donut,
+  - traffic by category,
+  - top bandwidth users.
+- Active connections table with search/filter/sort controls.
+- Top processes table with search/sort controls.
+- WHOIS modal placeholder.
+
+External dependencies loaded by template:
+- Chart.js 3.9.1
+- chartjs-adapter-date-fns
+- Font Awesome 6.4.0
+
+## 8.2 `static/js/dashboard_improved.js`
+
+Global state container: `AppState`.
+
+Core behaviors:
+- Initializes dashboard on `DOMContentLoaded`.
+- Polls `/api/status` every 1s.
+- Polls dashboard data endpoints every 1s via `updateDashboard()`.
+- Supports dark mode with localStorage persistence.
+- Manages notifications and toast messages.
+- Maintains speed history and dynamic axis scaling logic.
+- Updates tables and charts from API payloads.
+
+Functions implemented:
+- Monitoring controls:
+  - `startMonitoring()`, `stopMonitoring()`, `updateStatus()`.
+- Dashboard refresh:
+  - `updateDashboard()`, `updateStatistics()`, `updateCharts()`.
+- Chart management:
+  - `initializeCharts()`, `updateChartColors()`, `changeTimeRange()`, `refreshSpeedTrendChart()`, and helper functions.
+- Notifications:
+  - `addNotification()`, `updateNotificationUI()`, `clearNotifications()`, etc.
+- Utility formatting helpers:
+  - `formatSpeed()`, `formatBytes()`, `formatRuntime()`, `formatTimeAgo()`.
+
+Current stubs / partial features in JS:
+- `sortTable(...)` only logs, does not sort table rows.
+- `filterConnections()` and `filterProcesses()` only log/debounce, no row filtering applied.
+- `showWhoisInfo(ip)` currently logs and emits notification; does not call `/api/whois` or open modal content.
+
+## 8.3 `static/css/dashboard_improved.css`
+
+Defines:
+- full light/dark variable system,
+- responsive layouts,
+- cards, charts, tables, modal styles,
+- notifications/toasts,
+- status/risk visual states,
+- mobile breakpoints.
+
+## 9. Data and Configuration Files
+
+## 9.1 `blocklist.txt`
+Contains line-separated values used by `ServiceIdentifier`.
+
+Current content includes:
+- major tracker/ad domains,
+- CDN/platform domains,
+- generic security labels (`malware-domains`, `known-phishing`, etc.).
+
+Rule behavior:
+- exact match only in current categorization logic (`domain_lower in blocked_domains` before hierarchy checks).
+
+## 9.2 No database
+All runtime state is in memory.
+No SQL/NoSQL persistence.
+
+## 10. Operational Behavior Notes
+
+- Monitoring interval: approximately 1 second.
+- API list caps:
+  - 100 connections in `/api/connections` and `/api/dashboard` connection list.
+  - 50 processes in `/api/processes` and `/api/dashboard` process list.
+  - 10 top talkers.
+- Frontend polling interval: 1 second for status and main data update.
+
+## 11. Security Model (Current)
+
+Present safeguards:
+- critical PID blocklist in kill endpoint,
+- local/private IP detection in geo lookup,
+- explicit blocklist file support.
+
+Security gaps:
+- no authentication,
+- no authorization,
+- no rate limiting,
+- secret key hardcoded in source,
+- destructive endpoints exposed to any caller with network access to service port.
+
+## 12. Known Inconsistencies and Limitations
+
+1. `main.py` is removed, but helper scripts still reference old flow.
+2. `test_startup.py` references removed GUI symbols and missing imports.
+3. `install.py` installs only two packages and omits Flask/whois.
+4. `check_setup.py` validates only two packages and points user to `main.py`.
+5. `/api/export` returns both CSV and JSON filenames but writes only CSV.
+6. `monitor.py` stores connection byte fields but does not update per-connection sent/recv values from socket-level counters.
+7. Process byte stats are approximated by distributing system totals across process connection counts.
+8. DNS resolving module exists, but monitor currently categorizes using remote IP string directly (no reverse DNS call in main update path).
+9. `protocol` assignment in monitor checks `conn.type.upper()`; for numeric socket type values this falls back to `TCP`.
+10. Frontend includes UI hooks for filtering/sorting/WHOIS modal that are currently stubbed.
+11. `app.py` imports `send_file`, `threading`, `NetworkMonitor`, and `RiskLevel` without active use in current file logic.
+12. `app.py` path injection logic (`TOOL_DIR = Path(__file__).parent.parent / "network_analysis_tool"`) is redundant for this repository layout.
+
+## 13. Setup and Run (Authoritative)
+
+Windows PowerShell:
 
 ```powershell
 py -3 -m venv venv
@@ -133,254 +604,44 @@ pip install -r requirements.txt
 python app.py
 ```
 
-If PowerShell blocks activation:
+If script execution is blocked:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ```
 
-### Environment Variables (`.env` explanation)
-No `.env` file is required by current code. The app reads these environment variables directly from the process environment:
-- `PORT`: HTTP port (default `5001`)
-- `HOST`: bind host (default `127.0.0.1`)
-- `RENDER`: if set, host is forced to `0.0.0.0`
-
-Example `.env` (optional):
-
-```env
-HOST=127.0.0.1
-PORT=5001
-```
-
-## 6. Usage
-
-### How to Run
-
-```powershell
-python app.py
-```
-
-Open:
+Open dashboard:
 - `http://127.0.0.1:5001`
 
-### Key Commands/Scripts
-- `python app.py`: start dashboard backend.
-- `python check_setup.py`: run environment checks.
-- `python install.py`: basic dependency install helper.
+Admin privileges are recommended for complete process visibility and process-control endpoints.
 
-### Example Workflow
-1. Launch app and open dashboard.
-2. Click `Start`.
-3. Watch live speed chart, risk chart, and connection/process tables.
-4. Filter connections by risk/process or search by keyword.
-5. Inspect suspicious IP via WHOIS.
-6. Optionally block IP or terminate process.
-7. Export snapshot data.
+## 14. Cloud/Container Notes
 
-## 7. API Documentation
+The app can start in container environments using `PORT` and `RENDER` host behavior, but host-level network visibility will be limited compared to local-machine execution due to container isolation.
 
-Base URL (local): `http://127.0.0.1:5001`
+## 15. Suggested Maintenance Priorities
 
-### Endpoints
+1. Align helper scripts (`install.py`, `check_setup.py`) with current dependencies and `app.py` entrypoint.
+2. Implement real table sorting/filtering and full WHOIS modal flow in frontend.
+3. Move hardcoded secret and operational config to environment variables.
+4. Add auth/rate limiting for control endpoints (`/api/kill`, `/api/block`).
+5. Consolidate export logic with `report_exporter.py` and make JSON export real.
+6. Add automated tests for API contracts and monitor behavior.
 
-| Endpoint | Method | Description |
-|---|---|---|
-| `/` | GET | Dashboard HTML page |
-| `/api/status` | GET | Monitoring status and runtime |
-| `/api/start` | POST | Start monitoring |
-| `/api/stop` | POST | Stop monitoring |
-| `/api/statistics` | GET | Aggregate stats snapshot |
-| `/api/connections` | GET | Active connections (up to 100) |
-| `/api/processes` | GET | Process stats (top 50) |
-| `/api/protocol_stats` | GET | Protocol distribution |
-| `/api/top_talkers` | GET | Top 10 bandwidth processes |
-| `/api/whois?ip=<ip>` | GET | WHOIS/GeoIP text info |
-| `/api/kill/<pid>` | POST | Terminate process |
-| `/api/block/<ip>` | POST | Add IP to blocklist |
-| `/api/export` | POST | Export snapshot metadata |
-| `/api/dashboard` | GET | Combined dashboard payload |
+## 16. Quick API Health Checklist
 
-### Request/Response Format
-- Requests: JSON not required for most routes (query/path parameters only).
-- Responses: JSON objects with `success` or route-specific payload fields.
+- `GET /api/status` responds with running state.
+- `POST /api/start` starts monitor.
+- `GET /api/statistics` returns numeric metrics and distributions.
+- `GET /api/connections` and `GET /api/processes` return arrays and totals.
+- `POST /api/stop` stops monitor.
 
-Minimal response examples:
-
-```json
-{
-	"success": true,
-	"message": "Monitoring started"
-}
-```
-
-```json
-{
-	"success": false,
-	"error": "IP parameter required"
-}
-```
-
-### Auth Details
-- Authentication: None
-- Authorization: None
-- Access model: intended for local trusted usage
-
-## 8. Database Schema
-
-### Tables/Collections
-None. The project does not use SQL or NoSQL storage.
-
-### Relationships
-None at database level.
-
-### Important Data Structures (in-memory)
-- `NetworkMonitor.active_connections`: keyed by `(pid, remote_ip, remote_port)`.
-- `NetworkMonitor.process_stats`: keyed by `pid`.
-- `monitoring_state` in `app.py`: app-level monitoring status.
-- `ServiceIdentifier.blocked_domains`: loaded set from `blocklist.txt`.
-
-## 9. Key Modules Explanation
-
-### `monitor.py`
-Handles the core data collection loop:
-- Polls `psutil.net_connections(kind='inet')` every second.
-- Builds/updates connection state.
-- Removes stale connections.
-- Computes upload/download speed from `psutil.net_io_counters()` deltas.
-- Aggregates process stats (byte distribution is proportional approximation).
-
-### `risk_evaluator.py`
-Produces risk levels based on:
-- DNS/service category (`Trusted`, `Tracker`, `Unknown`, `Suspicious`, etc.).
-- Port heuristics (e.g., HTTP, Telnet/FTP, high ports).
-- Suspicious process naming patterns.
-
-### `utils.py`
-Contains:
-- `GeoIPLookup`: private-IP detection and optional GeoLite2 lookup.
-- `RiskScorer`: numeric scoring model (0-100) with explanatory reasons.
-- `ProtocolDetector`: maps known ports to application protocol labels.
-
-### `dns_resolver.py`
-Provides:
-- LRU + dictionary cache for reverse lookup.
-- Domain extraction and category mapping.
-- Blocklist loading from file.
-
-### `app.py`
-Coordinates everything:
-- Calls monitor accessors.
-- Formats payloads for frontend.
-- Exposes control and action endpoints.
-- Implements lightweight safety checks for process killing.
-
-### Interaction Summary
-`app.py` -> `monitor.py` -> (`risk_evaluator.py` + `dns_resolver.py` + `utils.py`) -> JSON -> `dashboard_improved.js` (poll/render/update).
-
-## 10. Error Handling and Logging
-
-### Error Handling
-- API endpoints use `try/except` and return JSON error payloads.
-- Monitor loop catches exceptions and prints diagnostics.
-- `psutil.AccessDenied` in monitor sets permission error state and stops monitoring.
-- DNS and GeoIP logic falls back gracefully when lookups fail.
-
-### Logging System
-- No dedicated logging framework is configured.
-- Logging is mostly `print(...)` to console stdout.
-- Frontend logs to browser console and shows UI notifications/toasts.
-
-## 11. Performance and Optimization
-
-- Background monitoring thread with 1-second polling interval.
-- Locking around shared state to reduce race conditions.
-- DNS caching (`@lru_cache(maxsize=1024)` + in-memory dict cache).
-- API list limits (`connections` 100, `processes` 50, `top_talkers` 10).
-- Frontend maintains bounded speed history (`maxSpeedHistorySeconds = 7200`).
-
-## 12. Security
-
-### Existing Security Measures
-- Basic critical PID protection in process kill route (blocks PID `0`, `4`, and current app PID).
-- Private/local IP recognition in geolocation path.
-- Local file blocklist support for suspicious domains/IPs.
-
-### Security Gaps
-- No authentication/authorization on API routes.
-- No built-in rate limiting.
-- Hardcoded Flask `SECRET_KEY` in source.
-- Process kill and block actions are exposed to any local caller with access.
-
-### Data Protection Practices
-- Data remains local/in-memory by default.
-- Exports are created on local filesystem when requested.
-- No explicit encryption at rest or in transit in local mode.
-
-## 13. Known Issues / Limitations
-
-- Platform focus is Windows; behavior on other OSes is not the primary target.
-- Full visibility often requires Administrator privileges.
-- No historical database; monitoring state is ephemeral.
-- Per-process byte allocation is approximate, not exact per-process network accounting.
-- `/api/export` currently returns CSV and JSON filenames, but only CSV is written in `app.py`.
-- `install.py` and `check_setup.py` reference legacy flow and do not include all active dependencies from `requirements.txt`.
-- `test_startup.py` references removed/legacy GUI paths and can fail.
-- `generate_report.py` depends on `python-docx`, which is not listed in `requirements.txt`.
-- Cloud/container deployment (for example Render) limits host-level monitoring visibility.
-
-## 14. Future Improvements / Roadmap
-
-- Add authentication and role-based access for control endpoints.
-- Add persistent storage for historical trend analysis.
-- Replace print logging with structured logging (`logging` module + rotation).
-- Add rate limiting and input validation hardening for action endpoints.
-- Add automated tests (unit + API integration).
-- Normalize and centralize export functionality through `report_exporter.py`.
-- Provide cross-platform support matrix and compatibility layer.
-- Externalize configuration (including `SECRET_KEY`) to environment variables.
-
-## 15. Contribution Guide
-
-### How to Contribute
-1. Fork and clone the repository.
-2. Create a virtual environment and install dependencies.
-3. Create a feature branch.
-4. Make focused changes with clear commit messages.
-5. Manually test affected API routes and dashboard behavior.
-6. Open a pull request with:
-	 - Problem statement
-	 - Change summary
-	 - Test steps and observed output
-
-### Code Style / Rules (current project reality)
-- Follow existing Python style and module boundaries.
-- Keep route handlers in `app.py` thin; put heavy logic in dedicated modules.
-- Keep frontend API handling in `dashboard_improved.js` and styling in `dashboard_improved.css`.
-- Avoid introducing assumptions that are not observable in code.
-
-## 16. License
-
-No `LICENSE` file is present in the repository at scan time. Treat this project as unlicensed/proprietary until the maintainer adds explicit license terms.
+If these pass, dashboard core functionality is operational.
 
 ---
 
-## Optional Diagram: Runtime Flow
-
-```text
-Browser UI (dashboard.html + dashboard_improved.js)
-			|
-			| polls /api/* every ~1s
-			v
-Flask app (app.py)
-			|
-			+--> NetworkMonitor (monitor.py)
-			|       +--> psutil connections + net I/O
-			|
-			+--> RiskEvaluator (risk_evaluator.py)
-			+--> DNSResolver/ServiceIdentifier (dns_resolver.py)
-			+--> RiskScorer/GeoIP/ProtocolDetector (utils.py)
-			|
-			+--> Export helpers (report_exporter.py)
-			v
-JSON responses -> charts/tables/notifications
-```
+If this project changes, update this document whenever:
+- endpoint fields change,
+- monitor data model changes,
+- frontend polling/render behavior changes,
+- dependencies or entrypoints change.
