@@ -1,7 +1,7 @@
 # Network Analysis Tool - Complete Bot Documentation
 
-Last updated: 2026-04-18
-Primary runtime entrypoint: `app.py`
+Last updated: 2026-04-20
+Primary runtime entrypoints: `app.py` (web) and `desktop_app.py` (desktop wrapper)
 
 ## 1. What This Project Is
 
@@ -26,6 +26,16 @@ High-level flow:
 5. Backend computes risk/protocol/geo fields and returns JSON payloads.
 6. Frontend updates stat cards, charts, tables, notifications, and status controls.
 
+Desktop wrapper flow (`desktop_app.py`):
+
+1. Loads persisted desktop settings from `desktop_settings.json`.
+2. Picks local bind port (preferred setting or free fallback).
+3. Starts embedded Flask server in background thread via `werkzeug.serving.make_server`.
+4. Displays loading panel until `/api/status` responds.
+5. Loads dashboard in `QWebEngineView`.
+6. Optionally auto-starts monitor by calling `POST /api/start`.
+7. On desktop exit, gracefully shuts down Flask server and monitor thread.
+
 Threading model:
 - One daemon monitor thread started by `/api/start`.
 - Flask request handlers run in threaded mode (`app.run(..., threaded=True)`).
@@ -37,18 +47,23 @@ Threading model:
 network_analysis_tool/
   app.py
   blocklist.txt
-  BOT_DOCUMENTATION.md
+  desktop_app.py
+  desktop_settings.json (created at runtime)
   check_setup.py
   dns_resolver.py
   generate_report.py
   install.py
+  local_agent.py
   main.py
   monitor.py
+  Procfile
   README.md
+  render.yaml
   report_exporter.py
   requirements.txt
   risk_evaluator.py
   test_startup.py
+  TOOL_DOCUMENTATION.md
   utils.py
   visualizer.py
   static/
@@ -67,6 +82,9 @@ network_analysis_tool/
 - `matplotlib>=3.5.0`
 - `Flask>=3.0.0`
 - `python-whois>=0.9.0`
+- `gunicorn>=22.0.0`
+- `PyQt6>=6.7.0`
+- `PyQt6-WebEngine>=6.7.0`
 
 ### 4.2 Optional dependencies used by code paths
 - `geoip2` (for MaxMind DB geolocation in `utils.py`)
@@ -77,8 +95,9 @@ If optional packages are missing, core monitoring still runs; those features deg
 
 ## 5. Entry Points and Script Status
 
-### Active runtime
+### Active runtimes
 - `python app.py`
+- `python desktop_app.py`
 
 ### Helper scripts
 - `check_setup.py`: checks Python version, basic deps (`psutil`, `matplotlib`), admin status.
@@ -97,13 +116,16 @@ Responsibilities:
 - Defines Flask app and all API routes.
 - Creates global singleton instances:
   - monitor (`get_network_monitor()`)
-  - visualizer (`DataVisualizer()`)
-  - exporter (`ReportExporter()`)
   - geoip (`get_geoip_lookup()`)
 - Maintains app-level monitoring state dictionary:
   - `is_running`
   - `start_time`
   - `last_update`
+- Maintains agent snapshot state for hosted agent mode:
+  - latest payload
+  - received timestamp
+- Exposes image endpoint for server-side chart rendering:
+  - `GET /api/charts/risk-distribution.png`
 - Starts Flask server with host/port from environment.
 
 Environment variable handling:
@@ -249,21 +271,23 @@ Export methods:
 - `generate_summary_text(connections, processes, speeds, total_data)`
 
 Note:
-- This module exists and is instantiated in `app.py`, but main export route currently uses direct CSV logic instead of these helpers.
+- This module exists but export route in `app.py` currently writes CSV directly.
 
 ## 6.7 `visualizer.py`
 
-Provides matplotlib/Tkinter chart creators:
+Provides matplotlib chart creators with headless backend (`Agg`):
 - `create_category_pie_chart`
 - `create_top_processes_chart`
 - `create_risk_distribution_chart`
+- `figure_to_png_bytes` (for Flask `send_file` PNG responses)
 
 Also includes formatting helpers:
 - `format_bytes`
 - `format_speed`
 
 Note:
-- Current Flask dashboard uses Chart.js in browser, not these Tkinter canvas chart functions.
+- Current dashboard still uses Chart.js in browser for interactive charts.
+- `visualizer.py` now also supports server-rendered PNG charts for API/image embedding paths.
 
 ## 6.8 `generate_report.py`
 
@@ -273,7 +297,9 @@ Not connected to runtime API or dashboard.
 
 ## 7. API Reference (Complete)
 
-Base URL (local): `http://127.0.0.1:5001`
+Base URL (local web mode): `http://127.0.0.1:5001`
+
+Base URL (desktop mode): `http://127.0.0.1:<dynamic-port>` (prefers `5000`)
 
 ## 7.1 `GET /`
 Returns dashboard HTML template (`dashboard.html`).
@@ -474,6 +500,14 @@ Data object includes:
 - `traffic_by_category`
 - `top_talkers`
 
+## 7.15 `GET /api/charts/risk-distribution.png`
+Returns a PNG chart generated on the server.
+
+Behavior:
+- Uses agent snapshot risk distribution when agent mode payload is present.
+- Otherwise computes risk distribution from current local monitor connections.
+- Response content type: `image/png`.
+
 ## 8. Frontend Documentation
 
 ## 8.1 `templates/dashboard.html`
@@ -590,8 +624,8 @@ Security gaps:
 8. DNS resolving module exists, but monitor currently categorizes using remote IP string directly (no reverse DNS call in main update path).
 9. `protocol` assignment in monitor checks `conn.type.upper()`; for numeric socket type values this falls back to `TCP`.
 10. Frontend includes UI hooks for filtering/sorting/WHOIS modal that are currently stubbed.
-11. `app.py` imports `send_file`, `threading`, `NetworkMonitor`, and `RiskLevel` without active use in current file logic.
-12. `app.py` path injection logic (`TOOL_DIR = Path(__file__).parent.parent / "network_analysis_tool"`) is redundant for this repository layout.
+11. `app.py` path injection logic (`TOOL_DIR = Path(__file__).parent.parent / "network_analysis_tool"`) is redundant for this repository layout.
+12. Desktop settings are persisted as plain JSON (`desktop_settings.json`) without schema versioning or migration logic.
 
 ## 13. Setup and Run (Authoritative)
 
@@ -604,6 +638,12 @@ pip install -r requirements.txt
 python app.py
 ```
 
+Desktop mode:
+
+```powershell
+python desktop_app.py
+```
+
 If script execution is blocked:
 
 ```powershell
@@ -612,6 +652,11 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 Open dashboard:
 - `http://127.0.0.1:5001`
+
+Desktop settings:
+- Open `App -> Settings` in desktop window.
+- Controls: preferred port, auto-start monitoring, log level.
+- Preferred port applies next launch; free-port fallback is automatic when occupied.
 
 Admin privileges are recommended for complete process visibility and process-control endpoints.
 

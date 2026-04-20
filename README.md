@@ -54,6 +54,31 @@ Dashboard URL:
 
 - http://127.0.0.1:5001
 
+Desktop mode (PyQt6 + embedded local Flask):
+
+```powershell
+python desktop_app.py
+```
+
+Desktop behavior:
+
+- Starts Flask locally on `127.0.0.1` (prefers port `5000`, auto-falls back to a free port)
+- Opens a desktop window with embedded dashboard
+- Shows loading screen until local server is ready
+- Shuts down local Flask server when desktop app exits
+- Includes desktop settings panel (`App -> Settings`) for preferred port, auto-start monitoring, and log level
+- Stores desktop settings in `desktop_settings.json`
+
+Desktop settings details:
+
+- Preferred port: used on next app launch (if busy, a free local port is used)
+- Auto-start monitoring: triggers `POST /api/start` after local server becomes ready
+- Log level: controls desktop wrapper logs (`DEBUG`, `INFO`, `WARNING`, `ERROR`)
+
+Optional endpoint for image-based chart rendering:
+
+- `GET /api/charts/risk-distribution.png`
+
 ## Deploy on Render
 
 1. Push this project to a GitHub repository.
@@ -137,10 +162,12 @@ Notes:
 - GET /api/dashboard
 - POST /api/agent/snapshot
 - GET /api/agent/status
+- GET /api/charts/risk-distribution.png
 
 ## Project Structure
 
 - app.py: Flask server and API routes
+- desktop_app.py: PyQt6 desktop wrapper that embeds local Flask dashboard
 - local_agent.py: local telemetry sender for Render agent mode
 - monitor.py: monitoring engine
 - dns_resolver.py: domain resolution helpers
@@ -155,6 +182,32 @@ Notes:
 - Data is processed locally on your machine.
 - Some actions and process visibility depend on permissions.
 - This project is intended for local monitoring and analysis.
+- Desktop mode runs completely local with no cloud dependency.
+
+## Build Desktop EXE (Windows)
+
+1. Install dependencies:
+
+```powershell
+pip install -r requirements.txt
+pip install pyinstaller
+```
+
+2. Build executable:
+
+```powershell
+pyinstaller --onefile --noconsole desktop_app.py
+```
+
+3. Run output:
+
+- Executable path: `dist\desktop_app.exe`
+
+If WebEngine runtime files are missing in one-file builds on your machine, rebuild with:
+
+```powershell
+pyinstaller --onefile --noconsole --collect-all PyQt6 --collect-all PyQt6-WebEngine desktop_app.py
+```
 
 When hosted on Render, monitoring visibility is constrained by container isolation.
 

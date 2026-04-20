@@ -3,7 +3,8 @@ Enhanced Flask Web Dashboard for Network Analysis Tool
 Provides real-time web interface with advanced features
 """
 
-from flask import Flask, render_template, jsonify, request
+from io import BytesIO
+from flask import Flask, render_template, jsonify, request, send_file
 import sys
 import os
 from pathlib import Path
@@ -18,6 +19,7 @@ sys.path.insert(0, str(TOOL_DIR))
 
 from monitor import get_network_monitor
 from utils import get_geoip_lookup, RiskScorer, ProtocolDetector
+from visualizer import DataVisualizer
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'network-analysis-tool-2026'
@@ -791,6 +793,40 @@ def api_dashboard():
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/charts/risk-distribution.png')
+def api_risk_distribution_chart():
+    """Render risk distribution as a PNG image for image-based dashboard embedding."""
+    agent_payload, age_seconds = _get_agent_payload()
+
+    if agent_payload:
+        stats = agent_payload.get('statistics', {}) if isinstance(agent_payload, dict) else {}
+        risk_dist = stats.get('risk_distribution', {}) if isinstance(stats, dict) else {}
+    else:
+        risk_dist = {'LOW': 0, 'MEDIUM': 0, 'HIGH': 0, 'CRITICAL': 0}
+        for conn in monitor.get_active_connections():
+            conn_age = int(time.time() - conn.created_at) if hasattr(conn, 'created_at') else 0
+            risk_score, _ = RiskScorer.calculate_score(
+                conn.remote_ip,
+                conn.remote_port,
+                conn.protocol,
+                conn.category,
+                conn.bytes_sent,
+                conn.bytes_recv,
+                conn_age
+            )
+            risk_level = RiskScorer.get_risk_level(risk_score)
+            risk_dist[risk_level] = risk_dist.get(risk_level, 0) + 1
+
+    fig, _ = DataVisualizer.create_risk_distribution_chart(risk_dist)
+    png_data = DataVisualizer.figure_to_png_bytes(fig)
+    return send_file(
+        BytesIO(png_data),
+        mimetype='image/png',
+        as_attachment=False,
+        download_name='risk-distribution.png'
+    )
 
 def format_bytes(bytes_val):
     """Format bytes to human readable"""

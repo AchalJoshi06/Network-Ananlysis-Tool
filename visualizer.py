@@ -3,10 +3,11 @@ Visualization Module
 Creates charts for data usage analysis
 """
 
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import io
+import matplotlib
+matplotlib.use('Agg')
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
-import tkinter as tk
 from typing import Dict, List, Tuple
 from monitor import ProcessStats
 
@@ -17,8 +18,8 @@ class DataVisualizer:
     @staticmethod
     def create_category_pie_chart(
         data: Dict[str, int],
-        parent_frame: tk.Frame = None
-    ) -> Tuple[Figure, FigureCanvasTkAgg]:
+        parent_frame=None
+    ) -> Tuple[Figure, None]:
         """
         Create pie chart of data usage by category
         Returns: (Figure, Canvas)
@@ -42,18 +43,13 @@ class DataVisualizer:
         
         fig.tight_layout()
         
-        if parent_frame:
-            canvas = FigureCanvasTkAgg(fig, master=parent_frame)
-            canvas.draw()
-            return fig, canvas
-        
         return fig, None
     
     @staticmethod
     def create_top_processes_chart(
         processes: List[ProcessStats],
-        parent_frame: tk.Frame = None
-    ) -> Tuple[Figure, FigureCanvasTkAgg]:
+        parent_frame=None
+    ) -> Tuple[Figure, None]:
         """
         Create bar chart of top processes by data usage
         Returns: (Figure, Canvas)
@@ -97,18 +93,13 @@ class DataVisualizer:
         
         fig.tight_layout()
         
-        if parent_frame:
-            canvas = FigureCanvasTkAgg(fig, master=parent_frame)
-            canvas.draw()
-            return fig, canvas
-        
         return fig, None
     
     @staticmethod
     def create_risk_distribution_chart(
         risk_data: Dict[str, int],
-        parent_frame: tk.Frame = None
-    ) -> Tuple[Figure, FigureCanvasTkAgg]:
+        parent_frame=None
+    ) -> Tuple[Figure, None]:
         """
         Create bar chart of risk level distribution
         Returns: (Figure, Canvas)
@@ -142,12 +133,16 @@ class DataVisualizer:
         
         fig.tight_layout()
         
-        if parent_frame:
-            canvas = FigureCanvasTkAgg(fig, master=parent_frame)
-            canvas.draw()
-            return fig, canvas
-        
         return fig, None
+
+    @staticmethod
+    def figure_to_png_bytes(fig: Figure) -> bytes:
+        """Render a matplotlib Figure into PNG bytes for Flask responses."""
+        buffer = io.BytesIO()
+        canvas = FigureCanvasAgg(fig)
+        canvas.draw()
+        canvas.print_png(buffer)
+        return buffer.getvalue()
     
     @staticmethod
     def _get_category_colors(categories: List[str]) -> List[str]:
