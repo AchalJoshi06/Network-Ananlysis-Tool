@@ -1219,6 +1219,16 @@ body {
     padding: var(--spacing-lg);
 }
 
+.whois-pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+}
+
 .text-muted {
     color: var(--text-muted) !important;
 }

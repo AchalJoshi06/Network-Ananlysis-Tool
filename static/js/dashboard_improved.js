@@ -15,7 +15,10 @@ const AppState = {
     notifications: { list: [], count: 0 },
     ui: { dropdownOpen: false, settingsOpen: false, speedRefreshInProgress: false },
     preferences: { notificationsEnabled: true, theme: 'dark' },
-    sort: { column: null, direction: 'asc' },
+    sort: {
+        connections: { column: null, direction: 'asc' },
+        processes: { column: null, direction: 'asc' }
+    },
     previousStats: { connections: 0, processes: 0 },
     debounceTimers: {},
     maxDataPoints: 60,  // Kept for backward compatibility
@@ -80,6 +83,21 @@ function setupEventListeners() {
         console.error('Application Error:', e);
         addNotification('Error', e.message, 'error');
     });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closeWhoisModal();
+        }
+    });
+
+    const whoisModal = document.getElementById('whoisModal');
+    if (whoisModal) {
+        whoisModal.addEventListener('click', (e) => {
+            if (e.target === whoisModal) {
+                closeWhoisModal();
+            }
+        });
+    }
 }
 
 // ==================== MONITORING CONTROLS ====================
@@ -941,15 +959,9 @@ function updateCharts(stats, connections, processes) {
         console.warn('No process data available for topTalkers chart - processes:', processes);
     }
     
-    // Update connections table
-    if (connections && connections.length > 0) {
-        renderConnectionsTable(connections);
-    }
-    
-    // Update processes table
-    if (processes && processes.length > 0) {
-        renderProcessesTable(processes);
-    }
+    // Update tables (including empty-state render)
+    renderConnectionsTable(connections || []);
+    renderProcessesTable(processes || []);
 }
 
 function canCollectSpeedPoint() {
@@ -1147,67 +1159,94 @@ function applyDynamicSpeedAxisScaling(chart) {
 function renderConnectionsTable(connections) {
     const tbody = document.getElementById('connectionsTableBody');
     if (!tbody) return;
+
+    const allConnections = Array.isArray(connections) ? connections : [];
+    updateConnectionProcessFilterOptions(allConnections);
+
+    const filteredConnections = getFilteredConnections(allConnections);
+    const sortedConnections = applySort(filteredConnections, 'connections');
+    const visibleConnections = sortedConnections.slice(0, 100);
     
-    if (!connections || connections.length === 0) {
+    if (allConnections.length === 0) {
         tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">No active connections found</td></tr>';
-        return;
-    }
-    
-    const rows = connections.slice(0, 100).map(conn => {
-        const riskColor = {
-            'LOW': '#43a047',
-            'MEDIUM': '#ffb300',
-            'HIGH': '#d84343',
-            'CRITICAL': '#b71c1c'
-        }[conn.risk_level] || '#b0b0b0';
+    } else if (visibleConnections.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">No connections match the current filters</td></tr>';
+    } else {
+        const rows = visibleConnections.map(conn => {
+            const riskColor = {
+                'LOW': '#43a047',
+                'MEDIUM': '#ffb300',
+                'HIGH': '#d84343',
+                'CRITICAL': '#b71c1c'
+            }[conn.risk_level] || '#b0b0b0';
+            const safeIp = String(conn.remote_ip || '').replace(/'/g, "\\'");
+            
+            return `<tr>
+                <td>${conn.process_name || 'Unknown'}</td>
+                <td>${conn.remote_ip}:${conn.remote_port}</td>
+                <td>${conn.country_name || conn.country || '-'}</td>
+                <td>${conn.state || 'ESTABLISHED'}</td>
+                <td>${conn.app_protocol || conn.protocol || 'TCP'}</td>
+                <td>${conn.bytes_sent_formatted || '0 B'}</td>
+                <td>${conn.bytes_recv_formatted || '0 B'}</td>
+                <td><span style="color: ${riskColor};">${conn.risk_level || 'LOW'}</span></td>
+                <td><button class="btn-sm" onclick="showWhoisInfo('${safeIp}')">WHOIS</button></td>
+            </tr>`;
+        }).join('');
         
-        return `<tr>
-            <td>${conn.process_name || 'Unknown'}</td>
-            <td>${conn.remote_ip}:${conn.remote_port}</td>
-            <td>${conn.country_name || conn.country || '-'}</td>
-            <td>${conn.state || 'ESTABLISHED'}</td>
-            <td>${conn.app_protocol || conn.protocol || 'TCP'}</td>
-            <td>${conn.bytes_sent_formatted || '0 B'}</td>
-            <td>${conn.bytes_recv_formatted || '0 B'}</td>
-            <td><span style="color: ${riskColor};">${conn.risk_level || 'LOW'}</span></td>
-            <td><button class="btn-sm" onclick="showWhoisInfo('${conn.remote_ip}')">WHOIS</button></td>
-        </tr>`;
-    }).join('');
-    
-    tbody.innerHTML = rows;
+        tbody.innerHTML = rows;
+    }
     
     // Update connections count
     const countEl = document.getElementById('connectionCount');
-    if (countEl) countEl.textContent = `(${connections.length})`;
+    if (countEl) {
+        if (sortedConnections.length !== allConnections.length) {
+            countEl.textContent = `(${sortedConnections.length} of ${allConnections.length})`;
+        } else {
+            countEl.textContent = `(${allConnections.length})`;
+        }
+    }
 }
 
 function renderProcessesTable(processes) {
     const tbody = document.getElementById('processesTableBody');
     if (!tbody) return;
+
+    const allProcesses = Array.isArray(processes) ? processes : [];
+    const filteredProcesses = getFilteredProcesses(allProcesses);
+    const sortedProcesses = applySort(filteredProcesses, 'processes');
+    const visibleProcesses = sortedProcesses.slice(0, 50);
     
-    if (!processes || processes.length === 0) {
+    if (allProcesses.length === 0) {
         tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No process data available</td></tr>';
-        return;
+    } else if (visibleProcesses.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No processes match the current search</td></tr>';
+    } else {
+        const rows = visibleProcesses.map(proc => {
+            return `<tr>
+                <td>${proc.process_name || 'Unknown'}</td>
+                <td>${proc.pid}</td>
+                <td>${proc.process_path || 'System'}</td>
+                <td>${proc.num_connections || 0}</td>
+                <td>${proc.bytes_sent_formatted || '0 B'}</td>
+                <td>${proc.bytes_recv_formatted || '0 B'}</td>
+                <td>${proc.total_formatted || '0 B'}</td>
+                <td>${proc.risk_level || 'LOW'}</td>
+            </tr>`;
+        }).join('');
+        
+        tbody.innerHTML = rows;
     }
-    
-    const rows = processes.slice(0, 50).map(proc => {
-        return `<tr>
-            <td>${proc.process_name || 'Unknown'}</td>
-            <td>${proc.pid}</td>
-            <td>${proc.process_path || 'System'}</td>
-            <td>${proc.num_connections || 0}</td>
-            <td>${proc.bytes_sent_formatted || '0 B'}</td>
-            <td>${proc.bytes_recv_formatted || '0 B'}</td>
-            <td>${proc.total_formatted || '0 B'}</td>
-            <td>${proc.risk_level || 'LOW'}</td>
-        </tr>`;
-    }).join('');
-    
-    tbody.innerHTML = rows;
     
     // Update process count
     const countEl = document.getElementById('processCount');
-    if (countEl) countEl.textContent = `(${processes.length})`;
+    if (countEl) {
+        if (sortedProcesses.length !== allProcesses.length) {
+            countEl.textContent = `(${sortedProcesses.length} of ${allProcesses.length})`;
+        } else {
+            countEl.textContent = `(${allProcesses.length})`;
+        }
+    }
 }
 
 function updateRiskLegend(riskData) {
@@ -1325,24 +1364,38 @@ function hideSkeleton(elementIds) {
     // Override by dashboard update
 }
 
-// ==================== TABLE FUNCTIONS (STUBS) ====================
+// ==================== TABLE FUNCTIONS ====================
 function sortTable(table, column) {
-    console.log(`Sort ${table} by ${column}`);
+    const sortState = AppState.sort[table];
+    if (!sortState) return;
+
+    if (sortState.column === column) {
+        sortState.direction = sortState.direction === 'asc' ? 'desc' : 'asc';
+    } else {
+        sortState.column = column;
+        sortState.direction = 'asc';
+    }
+
+    if (table === 'connections') {
+        renderConnectionsTable(AppState.data.connections || []);
+        return;
+    }
+
+    if (table === 'processes') {
+        renderProcessesTable(AppState.data.processes || []);
+    }
 }
 
 function filterConnections() {
-    const search = document.getElementById('connectionSearch')?.value || '';
-    const risk = document.getElementById('riskFilter')?.value || '';
     debounce('filterConnections', () => {
-        console.log(`Filter connections: search="${search}", risk="${risk}"`);
-    }, 300);
+        renderConnectionsTable(AppState.data.connections || []);
+    }, 180);
 }
 
 function filterProcesses() {
-    const search = document.getElementById('processSearch')?.value || '';
     debounce('filterProcesses', () => {
-        console.log(`Filter processes: search="${search}"`);
-    }, 300);
+        renderProcessesTable(AppState.data.processes || []);
+    }, 180);
 }
 
 function debounce(key, fn, delay) {
@@ -1350,10 +1403,173 @@ function debounce(key, fn, delay) {
     AppState.debounceTimers[key] = setTimeout(fn, delay);
 }
 
-function showWhoisInfo(ip) {
-    // Stub function for WHOIS modal
-    addNotification('WHOIS Lookup', `Looking up information for ${ip}...`, 'info');
-    console.log('WHOIS lookup for:', ip);
+function updateConnectionProcessFilterOptions(connections) {
+    const processFilter = document.getElementById('processFilter');
+    if (!processFilter) return;
+
+    const selected = processFilter.value;
+    const names = [...new Set(
+        (connections || [])
+            .map(conn => String(conn.process_name || '').trim())
+            .filter(Boolean)
+    )].sort((a, b) => a.localeCompare(b));
+
+    const options = ['<option value="">All Processes</option>']
+        .concat(names.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`));
+    processFilter.innerHTML = options.join('');
+
+    if (selected && names.includes(selected)) {
+        processFilter.value = selected;
+    }
+}
+
+function getFilteredConnections(connections) {
+    const search = (document.getElementById('connectionSearch')?.value || '').trim().toLowerCase();
+    const risk = document.getElementById('riskFilter')?.value || '';
+    const processName = document.getElementById('processFilter')?.value || '';
+
+    return (connections || []).filter(conn => {
+        if (risk && conn.risk_level !== risk) return false;
+        if (processName && conn.process_name !== processName) return false;
+
+        if (!search) return true;
+
+        const searchable = [
+            conn.process_name,
+            conn.remote_ip,
+            conn.remote_port,
+            conn.country_name,
+            conn.country,
+            conn.state,
+            conn.app_protocol,
+            conn.protocol,
+            conn.risk_level,
+            conn.category
+        ].map(v => String(v || '').toLowerCase()).join(' ');
+
+        return searchable.includes(search);
+    });
+}
+
+function getFilteredProcesses(processes) {
+    const search = (document.getElementById('processSearch')?.value || '').trim().toLowerCase();
+    if (!search) return processes || [];
+
+    return (processes || []).filter(proc => {
+        const searchable = [
+            proc.process_name,
+            proc.pid,
+            proc.process_path,
+            proc.risk_level,
+            proc.category,
+            proc.num_connections
+        ].map(v => String(v || '').toLowerCase()).join(' ');
+
+        return searchable.includes(search);
+    });
+}
+
+function getRiskRank(riskLevel) {
+    const ranks = { LOW: 1, MEDIUM: 2, HIGH: 3, CRITICAL: 4 };
+    return ranks[String(riskLevel || '').toUpperCase()] || 0;
+}
+
+function toIpv4Numeric(ipValue) {
+    const parts = String(ipValue || '').split('.').map(Number);
+    if (parts.length !== 4 || parts.some(part => !Number.isInteger(part) || part < 0 || part > 255)) {
+        return null;
+    }
+
+    return parts.reduce((acc, part) => (acc * 256) + part, 0);
+}
+
+function getSortValue(item, table, column) {
+    if (table === 'connections') {
+        if (column === 'remote_ip') {
+            const numericIp = toIpv4Numeric(item.remote_ip);
+            return numericIp !== null ? numericIp : String(item.remote_ip || '').toLowerCase();
+        }
+        if (column === 'country') return String(item.country_name || item.country || '').toLowerCase();
+        if (column === 'bytes_sent') return Number(item.bytes_sent || 0);
+        if (column === 'bytes_recv') return Number(item.bytes_recv || 0);
+        if (column === 'risk_score') return Number(item.risk_score || 0);
+        return String(item[column] || '').toLowerCase();
+    }
+
+    if (table === 'processes') {
+        if (column === 'pid') return Number(item.pid || 0);
+        if (column === 'path') return String(item.process_path || item.path || '').toLowerCase();
+        if (column === 'num_connections') return Number(item.num_connections || 0);
+        if (column === 'bytes_sent') return Number(item.bytes_sent || 0);
+        if (column === 'bytes_recv') return Number(item.bytes_recv || 0);
+        if (column === 'total') return Number(item.total || 0);
+        if (column === 'risk_level') return getRiskRank(item.risk_level);
+        return String(item[column] || '').toLowerCase();
+    }
+
+    return item[column];
+}
+
+function applySort(items, table) {
+    const sortState = AppState.sort[table];
+    if (!sortState || !sortState.column) {
+        return (items || []).slice();
+    }
+
+    const directionMultiplier = sortState.direction === 'asc' ? 1 : -1;
+
+    return (items || []).slice().sort((a, b) => {
+        const valueA = getSortValue(a, table, sortState.column);
+        const valueB = getSortValue(b, table, sortState.column);
+
+        const bothNumeric = Number.isFinite(valueA) && Number.isFinite(valueB);
+        if (bothNumeric) {
+            return (valueA - valueB) * directionMultiplier;
+        }
+
+        const textA = String(valueA || '');
+        const textB = String(valueB || '');
+        return textA.localeCompare(textB, undefined, { numeric: true, sensitivity: 'base' }) * directionMultiplier;
+    });
+}
+
+async function showWhoisInfo(ip) {
+    const whoisModal = document.getElementById('whoisModal');
+    const whoisContent = document.getElementById('whoisContent');
+    if (!whoisModal || !whoisContent || !ip) return;
+
+    whoisModal.classList.add('active');
+    whoisContent.innerHTML = `
+        <div class="loading-spinner">
+            <i class="fas fa-spinner fa-spin"></i>
+            Loading WHOIS for ${escapeHtml(String(ip))}...
+        </div>
+    `;
+
+    try {
+        const response = await fetch(`/api/whois?ip=${encodeURIComponent(ip)}`);
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || 'WHOIS lookup failed');
+        }
+
+        whoisContent.innerHTML = `<pre class="whois-pre">${escapeHtml(data.whois || 'No WHOIS information available.')}</pre>`;
+    } catch (error) {
+        console.error('WHOIS lookup error:', error);
+        whoisContent.innerHTML = `
+            <div class="text-center text-muted">
+                Failed to load WHOIS data for ${escapeHtml(String(ip))}.<br>
+                ${escapeHtml(error.message || 'Unknown error')}
+            </div>
+        `;
+    }
+}
+
+function closeWhoisModal() {
+    const whoisModal = document.getElementById('whoisModal');
+    if (!whoisModal) return;
+    whoisModal.classList.remove('active');
 }
 
 // Start the application

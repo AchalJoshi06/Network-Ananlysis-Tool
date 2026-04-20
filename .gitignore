@@ -16,6 +16,7 @@ env/
 # Local environment files
 .env
 .env.*
+.flask_secret_key
 
 # Runtime logs and crash outputs
 *.log

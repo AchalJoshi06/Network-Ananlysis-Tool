@@ -38,6 +38,18 @@ py -3 -m venv venv
 pip install -r requirements.txt
 ```
 
+Optional verification and one-shot installer scripts:
+
+```powershell
+python check_setup.py
+python install.py
+```
+
+Notes:
+
+- `check_setup.py` validates Python version, dependency imports from `requirements.txt`, and admin status.
+- `install.py` upgrades pip and installs all dependencies from `requirements.txt`.
+
 If PowerShell blocks activation, run this in the same terminal session and retry activation:
 
 ```powershell
@@ -108,8 +120,21 @@ You can also deploy with either of these files in the repo root:
 
 - `PORT`: HTTP port (default `5001`)
 - `HOST`: bind host (default `127.0.0.1` locally)
+- `APP_SECRET_KEY`: optional explicit Flask secret key override (recommended for managed/cloud deployments)
 - `AGENT_TOKEN`: shared token used by local agent to push snapshots to hosted API
 - `AGENT_STALE_SECONDS`: marks agent feed stale after N seconds without updates
+- `ACTION_TOKEN`: protects destructive endpoints (`POST /api/kill/<pid>`, `POST /api/block/<ip>`) via `X-Action-Token` header
+
+Secret key behavior:
+
+- If `APP_SECRET_KEY`/`FLASK_SECRET_KEY`/`SECRET_KEY` is set, that value is used.
+- Otherwise the app generates a strong secret key on first run and stores it in `.flask_secret_key`.
+
+Security behavior for destructive endpoints:
+
+- If `ACTION_TOKEN` is set: valid `X-Action-Token` is required for kill/block requests.
+- If `ACTION_TOKEN` is not set: kill/block requests are allowed only from strict localhost access.
+- For any non-local exposure (for example `0.0.0.0`), set `ACTION_TOKEN`.
 
 ## Render + Local Device Data (Agent Mode)
 
@@ -163,6 +188,11 @@ Notes:
 - POST /api/agent/snapshot
 - GET /api/agent/status
 - GET /api/charts/risk-distribution.png
+
+Control endpoint auth notes:
+
+- `POST /api/kill/<pid>` and `POST /api/block/<ip>` require `X-Action-Token` when `ACTION_TOKEN` is configured.
+- Without `ACTION_TOKEN`, these endpoints are restricted to strict localhost requests only.
 
 ## Project Structure
 

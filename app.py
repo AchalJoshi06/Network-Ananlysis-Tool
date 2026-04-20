@@ -7,6 +7,9 @@ from io import BytesIO
 from flask import Flask, render_template, jsonify, request, send_file
 import sys
 import os
+import ipaddress
+import hmac
+import secrets
 from pathlib import Path
 from datetime import datetime
 import threading
@@ -20,9 +23,96 @@ sys.path.insert(0, str(TOOL_DIR))
 from monitor import get_network_monitor
 from utils import get_geoip_lookup, RiskScorer, ProtocolDetector
 from visualizer import DataVisualizer
+from report_exporter import ReportExporter
+
+SECRET_KEY_FILE = Path(__file__).with_name('.flask_secret_key')
+
+
+def _load_or_create_secret_key() -> str:
+    """Load Flask secret key from env/file, or generate and persist on first run."""
+    env_key = (
+        os.getenv('APP_SECRET_KEY', '').strip()
+        or os.getenv('FLASK_SECRET_KEY', '').strip()
+        or os.getenv('SECRET_KEY', '').strip()
+    )
+    if env_key:
+        return env_key
+
+    try:
+        if SECRET_KEY_FILE.exists():
+            key = SECRET_KEY_FILE.read_text(encoding='utf-8').strip()
+            if key:
+                return key
+    except Exception as exc:
+        print(f"Warning: Could not read secret key file: {exc}")
+
+    key = secrets.token_urlsafe(64)
+    try:
+        SECRET_KEY_FILE.write_text(key, encoding='utf-8')
+        try:
+            os.chmod(SECRET_KEY_FILE, 0o600)
+        except Exception:
+            pass
+    except Exception as exc:
+        print(f"Warning: Could not persist secret key file: {exc}")
+
+    return key
+
+
+def _get_request_client_ip() -> str:
+    """Get originating client IP, honoring X-Forwarded-For when present."""
+    forwarded = request.headers.get('X-Forwarded-For', '').strip()
+    if forwarded:
+        return forwarded.split(',')[0].strip()
+    return (request.remote_addr or '').strip()
+
+
+def _is_loopback_ip(ip_value: str) -> bool:
+    """True if IP value points to local loopback."""
+    if not ip_value:
+        return False
+
+    ip_candidate = ip_value.strip().strip('[]')
+    if ip_candidate.lower() == 'localhost':
+        return True
+
+    try:
+        return ipaddress.ip_address(ip_candidate).is_loopback
+    except ValueError:
+        return False
+
+
+def _is_local_request() -> bool:
+    """Treat request as local only when host and client are both loopback."""
+    host_only = (request.host or '').split(':', 1)[0].strip().strip('[]').lower()
+    host_is_local = host_only in {'127.0.0.1', 'localhost', '::1'}
+    return host_is_local and _is_loopback_ip(_get_request_client_ip())
+
+
+def _require_action_token(action_name: str):
+    """Require X-Action-Token for destructive actions on non-local exposure."""
+    expected_token = os.getenv('ACTION_TOKEN', '').strip()
+    provided_token = request.headers.get('X-Action-Token', '').strip()
+
+    if expected_token:
+        if not provided_token or not hmac.compare_digest(provided_token, expected_token):
+            return jsonify({
+                'success': False,
+                'message': f'Unauthorized {action_name}. Provide a valid X-Action-Token header.'
+            }), 401
+        return None
+
+    if _is_local_request():
+        return None
+
+    return jsonify({
+        'success': False,
+        'message': f'{action_name} requires ACTION_TOKEN when service is exposed beyond localhost.'
+    }), 403
+
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'network-analysis-tool-2026'
+app.config['SECRET_KEY'] = _load_or_create_secret_key()
 
 # Global instances
 monitor = get_network_monitor()
@@ -569,6 +659,10 @@ Note: Full WHOIS lookup not available. Showing GeoIP data.
 @app.route('/api/kill/<int:pid>', methods=['POST'])
 def api_kill_process(pid):
     """Kill a process by PID"""
+    auth_error = _require_action_token('Process kill')
+    if auth_error:
+        return auth_error
+
     if _is_agent_mode_enabled():
         return _agent_mode_action_blocked('Process kill')
 
@@ -621,6 +715,10 @@ def api_kill_process(pid):
 @app.route('/api/block/<ip>', methods=['POST'])
 def api_block_ip(ip):
     """Block an IP by adding to blocklist"""
+    auth_error = _require_action_token('IP block')
+    if auth_error:
+        return auth_error
+
     if _is_agent_mode_enabled():
         return _agent_mode_action_blocked('IP block')
 
@@ -665,6 +763,8 @@ def api_export():
 
     try:
         connections = monitor.get_active_connections()
+        processes = monitor.get_process_stats()
+        total_sent, total_recv = monitor.get_total_data()
         timestamp = datetime.now().strftime('%Y-%m-%d_%H%M%S')
         
         csv_file = f'connections_{timestamp}.csv'
@@ -681,6 +781,74 @@ def api_export():
                     conn.protocol, conn.bytes_sent, conn.bytes_recv,
                     conn.risk_level.name, conn.category
                 ])
+
+        # Build summary payload for JSON export
+        risk_distribution = {'LOW': 0, 'MEDIUM': 0, 'HIGH': 0, 'CRITICAL': 0}
+        data_by_category = {}
+        alerts = []
+
+        for conn in connections:
+            conn_age = int(time.time() - conn.created_at) if hasattr(conn, 'created_at') else 0
+            risk_score, risk_reason = RiskScorer.calculate_score(
+                conn.remote_ip,
+                conn.remote_port,
+                conn.protocol,
+                conn.category,
+                conn.bytes_sent,
+                conn.bytes_recv,
+                conn_age
+            )
+            risk_level = RiskScorer.get_risk_level(risk_score)
+            risk_distribution[risk_level] = risk_distribution.get(risk_level, 0) + 1
+
+            category = conn.category or 'Unknown'
+            data_by_category[category] = data_by_category.get(category, 0) + conn.bytes_sent + conn.bytes_recv
+
+            if risk_level in ('HIGH', 'CRITICAL'):
+                alerts.append({
+                    'process_name': conn.process_name,
+                    'remote_ip': conn.remote_ip,
+                    'risk_level': risk_level,
+                    'risk_score': risk_score,
+                    'risk_reason': risk_reason
+                })
+
+        alerts = sorted(alerts, key=lambda item: item['risk_score'], reverse=True)[:20]
+
+        top_processes = sorted(
+            processes,
+            key=lambda proc: proc.bytes_sent + proc.bytes_recv,
+            reverse=True
+        )[:10]
+
+        duration = 'Unknown'
+        if monitoring_state['start_time']:
+            elapsed_seconds = max(0, int(time.time() - monitoring_state['start_time']))
+            duration = format_age(elapsed_seconds)
+
+        summary_data = {
+            'duration': duration,
+            'total_connections': len(connections),
+            'total_processes': len(processes),
+            'total_sent': total_sent,
+            'total_received': total_recv,
+            'data_by_category': data_by_category,
+            'risk_distribution': risk_distribution,
+            'top_processes': [
+                {
+                    'process_name': proc.process_name,
+                    'pid': proc.pid,
+                    'bytes_sent': proc.bytes_sent,
+                    'bytes_recv': proc.bytes_recv,
+                    'total_bytes': proc.bytes_sent + proc.bytes_recv,
+                    'num_connections': proc.num_connections
+                }
+                for proc in top_processes
+            ],
+            'alerts': alerts
+        }
+
+        ReportExporter.export_summary_json(summary_data, filename=json_file)
         
         return jsonify({
             'success': True,

@@ -129,12 +129,14 @@ class NetworkMonitor:
                             proc_name = f"PID-{conn.pid}"
                         
                         if key not in self.active_connections:
-                            # New connection - use IP only (NO DNS LOOKUPS)
+                            # New connection - resolve DNS with cache and fall back to IP.
                             remote_ip = conn.raddr[0]
-                            remote_domain = remote_ip  # Don't resolve, just use IP
+                            try:
+                                remote_domain = self.dns_resolver.resolve_ip(remote_ip)
+                            except Exception:
+                                remote_domain = remote_ip
                             
-                            # Categorize by IP (very fast, no network calls)
-                            category, description = self.risk_evaluator.dns_resolver.service_identifier.categorize_domain(remote_ip)
+                            category, description = self.risk_evaluator.dns_resolver.service_identifier.categorize_domain(remote_domain)
                             risk_level, risk_reason = self.risk_evaluator.evaluate_connection(
                                 remote_ip, conn.raddr[1], proc_name
                             )
