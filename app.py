@@ -33,14 +33,142 @@ monitoring_state = {
     'last_update': None
 }
 
+# Agent mode state (used when a local device pushes snapshots to hosted API)
+agent_snapshot_state = {
+    'payload': None,
+    'received_at': 0.0
+}
+agent_snapshot_lock = threading.Lock()
+
+
+def _get_agent_stale_seconds() -> int:
+    """Read agent staleness timeout from environment."""
+    try:
+        return max(5, int(os.getenv('AGENT_STALE_SECONDS', '30')))
+    except ValueError:
+        return 30
+
+
+def _get_agent_payload():
+    """Return latest pushed payload and age in seconds, or (None, None)."""
+    with agent_snapshot_lock:
+        payload = agent_snapshot_state.get('payload')
+        received_at = agent_snapshot_state.get('received_at', 0.0)
+
+    if not payload:
+        return None, None
+
+    return payload, max(0.0, time.time() - received_at)
+
+
+def _is_agent_payload_fresh(age_seconds: float) -> bool:
+    """Check whether pushed payload is fresh enough for real-time dashboard usage."""
+    if age_seconds is None:
+        return False
+    return age_seconds <= _get_agent_stale_seconds()
+
+
+def _is_agent_mode_enabled() -> bool:
+    """True if any snapshot has been received from a local agent."""
+    payload, _ = _get_agent_payload()
+    return payload is not None
+
+
+def _require_agent_token():
+    """Validate agent token header for ingestion endpoints."""
+    expected_token = os.getenv('AGENT_TOKEN', '').strip()
+    if not expected_token:
+        return jsonify({
+            'success': False,
+            'message': 'AGENT_TOKEN is not configured on the server'
+        }), 503
+
+    provided_token = request.headers.get('X-Agent-Token', '').strip()
+    if provided_token != expected_token:
+        return jsonify({
+            'success': False,
+            'message': 'Unauthorized agent token'
+        }), 401
+
+    return None
+
+
+def _agent_mode_action_blocked(action_name: str):
+    """Prevent local-host actions when dashboard is driven by remote agent snapshots."""
+    return jsonify({
+        'success': False,
+        'message': f'{action_name} is disabled while agent mode is active. Run this action on the local agent host.'
+    }), 400
+
 @app.route('/')
 def index():
     """Main dashboard page"""
     return render_template('dashboard.html')
 
+
+@app.route('/api/agent/snapshot', methods=['POST'])
+def api_agent_snapshot():
+    """Receive full dashboard snapshot from a local agent process."""
+    auth_error = _require_agent_token()
+    if auth_error:
+        return auth_error
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({
+            'success': False,
+            'message': 'Invalid JSON payload'
+        }), 400
+
+    with agent_snapshot_lock:
+        agent_snapshot_state['payload'] = payload
+        agent_snapshot_state['received_at'] = time.time()
+
+    return jsonify({
+        'success': True,
+        'message': 'Snapshot received',
+        'received_at': datetime.now().isoformat()
+    })
+
+
+@app.route('/api/agent/status')
+def api_agent_status():
+    """Get local-agent feed health from the hosted service."""
+    payload, age_seconds = _get_agent_payload()
+    if not payload:
+        return jsonify({
+            'success': True,
+            'agent_connected': False,
+            'agent_fresh': False
+        })
+
+    status_data = payload.get('status', {}) if isinstance(payload, dict) else {}
+    return jsonify({
+        'success': True,
+        'agent_connected': True,
+        'agent_fresh': _is_agent_payload_fresh(age_seconds),
+        'agent_age_seconds': round(age_seconds, 1),
+        'last_update': status_data.get('last_update')
+    })
+
 @app.route('/api/status')
 def api_status():
     """Get monitoring status"""
+    agent_payload, age_seconds = _get_agent_payload()
+    if agent_payload:
+        status_data = agent_payload.get('status', {}) if isinstance(agent_payload, dict) else {}
+        elapsed_seconds = int(status_data.get('elapsed_seconds', 0))
+        runtime_formatted = status_data.get('runtime_formatted') or format_age(elapsed_seconds)
+        return jsonify({
+            'running': _is_agent_payload_fresh(age_seconds) and status_data.get('running', True),
+            'elapsed_seconds': elapsed_seconds,
+            'runtime_formatted': runtime_formatted,
+            'last_update': status_data.get('last_update'),
+            'data_source': 'agent',
+            'agent_age_seconds': round(age_seconds, 1),
+            'agent_stale': not _is_agent_payload_fresh(age_seconds)
+        })
+
     if monitoring_state['is_running']:
         elapsed_seconds = int(time.time() - monitoring_state['start_time']) if monitoring_state['start_time'] else 0
         hours = elapsed_seconds // 3600
@@ -64,6 +192,12 @@ def api_status():
 def api_start():
     """Start network monitoring"""
     global monitoring_state
+
+    if _is_agent_mode_enabled():
+        return jsonify({
+            'success': False,
+            'message': 'Agent mode is active. Start monitoring on your local agent machine instead.'
+        })
     
     if not monitoring_state['is_running']:
         try:
@@ -81,6 +215,12 @@ def api_start():
 def api_stop():
     """Stop network monitoring"""
     global monitoring_state
+
+    if _is_agent_mode_enabled():
+        return jsonify({
+            'success': False,
+            'message': 'Agent mode is active. Stop monitoring on your local agent machine instead.'
+        })
     
     if monitoring_state['is_running']:
         try:
@@ -95,6 +235,18 @@ def api_stop():
 @app.route('/api/connections')
 def api_connections():
     """Get active connections with enhanced data"""
+    agent_payload, age_seconds = _get_agent_payload()
+    if agent_payload:
+        agent_connections = agent_payload.get('connections', []) if isinstance(agent_payload, dict) else []
+        return jsonify({
+            'success': True,
+            'connections': agent_connections,
+            'total': len(agent_connections),
+            'data_source': 'agent',
+            'agent_age_seconds': round(age_seconds, 1),
+            'agent_stale': not _is_agent_payload_fresh(age_seconds)
+        })
+
     try:
         connections = monitor.get_active_connections()
         
@@ -163,6 +315,18 @@ def api_connections():
 @app.route('/api/processes')
 def api_processes():
     """Get process statistics with enhanced data"""
+    agent_payload, age_seconds = _get_agent_payload()
+    if agent_payload:
+        agent_processes = agent_payload.get('processes', []) if isinstance(agent_payload, dict) else []
+        return jsonify({
+            'success': True,
+            'processes': agent_processes,
+            'total': len(agent_processes),
+            'data_source': 'agent',
+            'agent_age_seconds': round(age_seconds, 1),
+            'agent_stale': not _is_agent_payload_fresh(age_seconds)
+        })
+
     try:
         processes = monitor.get_process_stats()
         
@@ -202,6 +366,16 @@ def api_processes():
 @app.route('/api/statistics')
 def api_statistics():
     """Get summary statistics"""
+    agent_payload, age_seconds = _get_agent_payload()
+    if agent_payload:
+        return jsonify({
+            'success': True,
+            'statistics': agent_payload.get('statistics', {}),
+            'data_source': 'agent',
+            'agent_age_seconds': round(age_seconds, 1),
+            'agent_stale': not _is_agent_payload_fresh(age_seconds)
+        })
+
     try:
         # Get speed data
         upload_speed, download_speed = monitor.get_speed()
@@ -257,6 +431,18 @@ def api_statistics():
 @app.route('/api/protocol_stats')
 def api_protocol_stats():
     """Get protocol breakdown statistics"""
+    agent_payload, age_seconds = _get_agent_payload()
+    if agent_payload:
+        protocol_stats = agent_payload.get('protocol_stats', []) if isinstance(agent_payload, dict) else []
+        return jsonify({
+            'success': True,
+            'protocol_stats': protocol_stats,
+            'total': sum(item.get('count', 0) for item in protocol_stats if isinstance(item, dict)),
+            'data_source': 'agent',
+            'agent_age_seconds': round(age_seconds, 1),
+            'agent_stale': not _is_agent_payload_fresh(age_seconds)
+        })
+
     try:
         connections = monitor.get_active_connections()
         
@@ -290,6 +476,17 @@ def api_protocol_stats():
 @app.route('/api/top_talkers')
 def api_top_talkers():
     """Get top bandwidth consuming processes"""
+    agent_payload, age_seconds = _get_agent_payload()
+    if agent_payload:
+        talkers = agent_payload.get('top_talkers', []) if isinstance(agent_payload, dict) else []
+        return jsonify({
+            'success': True,
+            'talkers': talkers,
+            'data_source': 'agent',
+            'agent_age_seconds': round(age_seconds, 1),
+            'agent_stale': not _is_agent_payload_fresh(age_seconds)
+        })
+
     try:
         processes = monitor.get_process_stats()
         
@@ -370,6 +567,9 @@ Note: Full WHOIS lookup not available. Showing GeoIP data.
 @app.route('/api/kill/<int:pid>', methods=['POST'])
 def api_kill_process(pid):
     """Kill a process by PID"""
+    if _is_agent_mode_enabled():
+        return _agent_mode_action_blocked('Process kill')
+
     try:
         # Security check - don't kill critical system processes
         critical_pids = [0, 4, os.getpid()]  # System, System Idle, Current process
@@ -419,6 +619,9 @@ def api_kill_process(pid):
 @app.route('/api/block/<ip>', methods=['POST'])
 def api_block_ip(ip):
     """Block an IP by adding to blocklist"""
+    if _is_agent_mode_enabled():
+        return _agent_mode_action_blocked('IP block')
+
     try:
         blocklist_file = 'blocklist.txt'
         
@@ -455,6 +658,9 @@ def api_block_ip(ip):
 @app.route('/api/export', methods=['POST'])
 def api_export():
     """Export data to CSV and JSON"""
+    if _is_agent_mode_enabled():
+        return _agent_mode_action_blocked('Export')
+
     try:
         connections = monitor.get_active_connections()
         timestamp = datetime.now().strftime('%Y-%m-%d_%H%M%S')
@@ -485,6 +691,16 @@ def api_export():
 @app.route('/api/dashboard')
 def api_dashboard():
     """Get complete dashboard data for refactored dashboard"""
+    agent_payload, age_seconds = _get_agent_payload()
+    if agent_payload:
+        return jsonify({
+            'success': True,
+            'data': agent_payload.get('dashboard', {}),
+            'data_source': 'agent',
+            'agent_age_seconds': round(age_seconds, 1),
+            'agent_stale': not _is_agent_payload_fresh(age_seconds)
+        })
+
     try:
         # Get all required data
         upload_speed, download_speed = monitor.get_speed()

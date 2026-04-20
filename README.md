@@ -66,6 +66,8 @@ Dashboard URL:
 4. Add optional environment variable if needed:
 
 - `PYTHON_VERSION=3.11.9` (optional, for a fixed runtime)
+- `AGENT_TOKEN=<your-strong-shared-token>` (required for local agent mode)
+- `AGENT_STALE_SECONDS=30` (optional, default `30`)
 
 The app already supports Render-style startup via environment variables:
 
@@ -81,6 +83,35 @@ You can also deploy with either of these files in the repo root:
 
 - `PORT`: HTTP port (default `5001`)
 - `HOST`: bind host (default `127.0.0.1` locally)
+- `AGENT_TOKEN`: shared token used by local agent to push snapshots to hosted API
+- `AGENT_STALE_SECONDS`: marks agent feed stale after N seconds without updates
+
+## Render + Local Device Data (Agent Mode)
+
+If you host the dashboard on Render and want to see your own PC data, run the local agent on your PC.
+
+1. In Render service environment, set `AGENT_TOKEN` to a strong secret.
+2. Deploy latest code.
+3. On your local machine, run:
+
+```powershell
+python local_agent.py --server https://<your-render-service>.onrender.com --token <same-agent-token>
+```
+
+Optional arguments:
+
+- `--interval 3` (push every 3 seconds)
+- `--timeout 15`
+
+Agent endpoints on hosted service:
+
+- `POST /api/agent/snapshot` (ingestion, token-protected)
+- `GET /api/agent/status` (feed health)
+
+Notes:
+
+- Run `local_agent.py` as Administrator for best visibility.
+- Once agent mode is active, kill/block/export actions are intentionally disabled on hosted service to avoid acting on the wrong machine.
 
 ## Render Limitations
 
@@ -104,10 +135,13 @@ You can also deploy with either of these files in the repo root:
 - POST /api/block/<ip>
 - POST /api/export
 - GET /api/dashboard
+- POST /api/agent/snapshot
+- GET /api/agent/status
 
 ## Project Structure
 
 - app.py: Flask server and API routes
+- local_agent.py: local telemetry sender for Render agent mode
 - monitor.py: monitoring engine
 - dns_resolver.py: domain resolution helpers
 - risk_evaluator.py: risk logic
