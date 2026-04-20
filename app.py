@@ -3,7 +3,7 @@ Enhanced Flask Web Dashboard for Network Analysis Tool
 Provides real-time web interface with advanced features
 """
 
-from flask import Flask, render_template, jsonify, request, send_file
+from flask import Flask, render_template, jsonify, request
 import sys
 import os
 from pathlib import Path
@@ -16,10 +16,7 @@ import psutil
 TOOL_DIR = Path(__file__).parent.parent / "network_analysis_tool"
 sys.path.insert(0, str(TOOL_DIR))
 
-from monitor import NetworkMonitor, get_network_monitor
-from risk_evaluator import RiskLevel
-from report_exporter import ReportExporter
-from visualizer import DataVisualizer
+from monitor import get_network_monitor
 from utils import get_geoip_lookup, RiskScorer, ProtocolDetector
 
 app = Flask(__name__)
@@ -27,8 +24,6 @@ app.config['SECRET_KEY'] = 'network-analysis-tool-2026'
 
 # Global instances
 monitor = get_network_monitor()
-visualizer = DataVisualizer()
-exporter = ReportExporter()
 geoip = get_geoip_lookup()
 
 # Monitoring state

@@ -8,7 +8,25 @@ import json
 from datetime import datetime
 from typing import List, Dict
 from monitor import ConnectionInfo, ProcessStats
-from visualizer import DataVisualizer
+
+
+def _format_bytes(bytes_val: int) -> str:
+    """Format bytes to human-readable format."""
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if bytes_val < 1024:
+            return f"{bytes_val:.1f} {unit}"
+        bytes_val /= 1024
+    return f"{bytes_val:.1f} TB"
+
+
+def _format_speed(kb_per_sec: float) -> str:
+    """Format speed to human-readable format."""
+    if kb_per_sec < 1024:
+        return f"{kb_per_sec:.1f} KB/s"
+    elif kb_per_sec < 1024 * 1024:
+        return f"{kb_per_sec / 1024:.1f} MB/s"
+    else:
+        return f"{kb_per_sec / (1024 * 1024):.1f} GB/s"
 
 
 class ReportExporter:
@@ -47,8 +65,8 @@ class ReportExporter:
                         'Remote Port': conn.remote_port,
                         'Domain': conn.remote_domain,
                         'Protocol': conn.protocol,
-                        'Bytes Sent': DataVisualizer.format_bytes(conn.bytes_sent),
-                        'Bytes Received': DataVisualizer.format_bytes(conn.bytes_recv),
+                        'Bytes Sent': _format_bytes(conn.bytes_sent),
+                        'Bytes Received': _format_bytes(conn.bytes_recv),
                         'Category': conn.category,
                         'Risk Level': conn.risk_level.name if conn.risk_level else 'UNKNOWN',
                         'Risk Reason': conn.risk_reason,
@@ -88,9 +106,9 @@ class ReportExporter:
                         'Timestamp': datetime.now().isoformat(),
                         'PID': proc.pid,
                         'Process Name': proc.process_name,
-                        'Bytes Sent': DataVisualizer.format_bytes(proc.bytes_sent),
-                        'Bytes Received': DataVisualizer.format_bytes(proc.bytes_recv),
-                        'Total Data': DataVisualizer.format_bytes(total_data),
+                        'Bytes Sent': _format_bytes(proc.bytes_sent),
+                        'Bytes Received': _format_bytes(proc.bytes_recv),
+                        'Total Data': _format_bytes(total_data),
                         'Connections Count': proc.num_connections,
                         'Category': proc.category,
                         'Risk Level': proc.avg_risk_level.name if proc.avg_risk_level else 'UNKNOWN',
@@ -165,15 +183,15 @@ class ReportExporter:
                 writer.writerow(['Metric', 'Value'])
                 writer.writerow(['Total Connections', len(connections)])
                 writer.writerow(['Total Processes', len(processes)])
-                writer.writerow(['Total Data Sent', DataVisualizer.format_bytes(summary.get('total_sent', 0))])
-                writer.writerow(['Total Data Received', DataVisualizer.format_bytes(summary.get('total_received', 0))])
+                writer.writerow(['Total Data Sent', _format_bytes(summary.get('total_sent', 0))])
+                writer.writerow(['Total Data Received', _format_bytes(summary.get('total_received', 0))])
                 writer.writerow([])
                 
                 # Data by category
                 writer.writerow(['DATA BY CATEGORY'])
                 writer.writerow(['Category', 'Bytes'])
                 for category, bytes_val in summary.get('data_by_category', {}).items():
-                    writer.writerow([category, DataVisualizer.format_bytes(bytes_val)])
+                    writer.writerow([category, _format_bytes(bytes_val)])
                 writer.writerow([])
                 
                 # Connection details
@@ -188,8 +206,8 @@ class ReportExporter:
                         conn.process_name,
                         conn.remote_ip,
                         conn.remote_domain,
-                        DataVisualizer.format_bytes(conn.bytes_sent),
-                        DataVisualizer.format_bytes(conn.bytes_recv),
+                        _format_bytes(conn.bytes_sent),
+                        _format_bytes(conn.bytes_recv),
                         conn.risk_level.name if conn.risk_level else 'UNKNOWN',
                         conn.risk_reason,
                     ])
@@ -205,8 +223,8 @@ class ReportExporter:
                     writer.writerow([
                         proc.pid,
                         proc.process_name,
-                        DataVisualizer.format_bytes(proc.bytes_sent),
-                        DataVisualizer.format_bytes(proc.bytes_recv),
+                        _format_bytes(proc.bytes_sent),
+                        _format_bytes(proc.bytes_recv),
                         proc.num_connections,
                         proc.avg_risk_level.name if proc.avg_risk_level else 'UNKNOWN',
                     ])
@@ -234,12 +252,12 @@ class ReportExporter:
 === NETWORK ANALYSIS SUMMARY ===
 
 Speed:
-  Upload: {DataVisualizer.format_speed(upload_speed)}
-  Download: {DataVisualizer.format_speed(download_speed)}
+    Upload: {_format_speed(upload_speed)}
+    Download: {_format_speed(download_speed)}
 
 Data:
-  Total Sent: {DataVisualizer.format_bytes(total_sent)}
-  Total Received: {DataVisualizer.format_bytes(total_recv)}
+    Total Sent: {_format_bytes(total_sent)}
+    Total Received: {_format_bytes(total_recv)}
 
 Connections:
   Total: {len(connections)}
@@ -253,7 +271,7 @@ Processes:
         if processes:
             top_process = processes[0]
             summary += f"  Top Consumer: {top_process.process_name}"
-            summary += f" ({DataVisualizer.format_bytes(top_process.bytes_sent + top_process.bytes_recv)})\n"
+            summary += f" ({_format_bytes(top_process.bytes_sent + top_process.bytes_recv)})\n"
         
         summary += "===============================\n"
         
